@@ -1,0 +1,9 @@
+# 1. Eliminar .env del rastreo de Git (no borrará tu archivo local)
+git rm --cached .env
+
+# 2. Confirmar que .env esté registrado en .gitignore
+echo ".env" >> .gitignore
+
+# 3. Guardar el cambio en Git
+git add .gitignore .env
+git commit -m "Remove .env from repository and update .gitignore"
