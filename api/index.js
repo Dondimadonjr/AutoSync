@@ -29,16 +29,19 @@ app.post('/generar-post', async (req, res) => {
   try {
     const { clienteId, producto, descripcion, mediaUrl } = req.body;
 
-    // Generar con IA
+    // 1. Generar la propuesta con Gemini
     const propuesta = await generarPropuestaPublicacion(producto, descripcion);
 
-    // Notificar por Telegram
-    const chatId = process.env.TELEGRAM_CHAT_ID;
+    // 2. Chat ID prioritario (del Body o del .env)
+    const chatId = req.body.chatId || process.env.TELEGRAM_CHAT_ID;
+
+    // 3. Esperar obligatoriamente a que Telegram complete el envío
     await enviarBorradorAPermiso(bot, chatId, clienteId, mediaUrl, propuesta);
 
+    // 4. Responder al cliente
     res.status(200).send({ status: 'Borrador generado y enviado a Telegram para aprobación' });
   } catch (error) {
-    console.error('Error detallado:', error);
+    console.error('Error al generar post:', error);
     res.status(500).send({ error: 'Error en la generación de borrador', detalle: error.message });
   }
 });
