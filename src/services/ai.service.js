@@ -19,13 +19,12 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
 }
 `;
 
-  // Control de timeout estricto para evitar congelar la función Serverless de Vercel
-  const timeoutMs = 8000;
+  const timeoutMs = 12000;
   let timeoutId;
 
   const timeoutPromise = new Promise((_, reject) => {
     timeoutId = setTimeout(() => {
-      const err = new Error(`La API de Gemini tardó demasiado en responder (Timeout de ${timeoutMs / 1000}s alcanzado).`);
+      const err = new Error(`La API de Gemini excedió el tiempo límite (${timeoutMs / 1000}s).`);
       err.name = 'TimeoutError';
       reject(err);
     }, timeoutMs);
@@ -33,20 +32,21 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
 
   try {
     const apiCallPromise = ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
       },
     });
 
-    // Competir entre la respuesta de la IA y el timeout de seguridad
     const response = await Promise.race([apiCallPromise, timeoutPromise]);
     clearTimeout(timeoutId);
 
-    const parsed = JSON.parse(response.text);
+    // Extraer texto directamente de la respuesta del SDK
+    const text = response.text;
+    const parsed = typeof text === 'string' ? JSON.parse(text) : text;
 
-    // Normalizar hashtags para garantizar que sea un array
+    // Normalizar hashtags
     if (typeof parsed.hashtags === 'string') {
       parsed.hashtags = parsed.hashtags.split(' ').filter(Boolean);
     } else if (!Array.isArray(parsed.hashtags)) {
@@ -56,7 +56,7 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
     return parsed;
   } catch (error) {
     clearTimeout(timeoutId);
-    console.error('Error directo en Gemini:', error);
+    console.error('Error en Gemini:', error.message || error);
     throw new Error(`Error en el motor de IA: ${error.message || error}`);
   }
 }
