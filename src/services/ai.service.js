@@ -19,8 +19,8 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
 }
 `;
 
-  // Modelo activo estándar de Gemini en la SDK @google/genai
-  const modelName = 'gemini-2.5-flash';
+  // Modelo activo requerido por la API
+  const modelName = 'gemini-3.6-flash';
 
   for (let i = 0; i < retries; i++) {
     try {
