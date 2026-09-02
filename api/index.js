@@ -25,7 +25,7 @@ const { enviarBorradorAPermiso } = require('../src/services/notifier');
 const { publicarEnInstagram } = require('../src/services/meta');
 
 // Endpoint para solicitar la creación de un nuevo post
-app.post('/api/generar-post', async (req, res) => {
+app.post('/generar-post', async (req, res) => {
   try {
     const { clienteId, producto, descripcion, mediaUrl } = req.body;
 
@@ -49,7 +49,7 @@ app.get('/', (req, res) => {
 });
 
 // Endpoint que recibirá las notificaciones de Telegram mediante Webhook cuando despleguemos en Vercel
-app.post(`/api/telegram-webhook`, (req, res) => {
+app.post('/telegram-webhook', (req, res) => {
   bot.processUpdate(req.body);
   res.sendStatus(200);
 });
