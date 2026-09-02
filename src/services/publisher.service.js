@@ -98,22 +98,25 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       `🎉 ¡Publicado con éxito en Instagram! ID Post: \`${postId}\``
     );
   } catch (error) {
-    logger.error('Error al publicar en Instagram', {
+    // Imprime la respuesta técnica devuelta por la API de Meta
+    const metaErrorDetails = error.response?.data || error.message || error;
+    logger.error('Error detallado al publicar en Instagram Meta API:', {
       publicacionId,
-      error: error.message,
+      errorMeta: metaErrorDetails
     });
 
-    // Mantener como aprobado en caso de error de red o de API de Meta
     await supabase
       .from('publicaciones')
       .update({ estado: POST_STATUS.APROBADO })
       .eq('id', publicacionId);
 
-    await registrarLog(publicacionId, 'PUBLICACION_FALLIDA', 'ERROR', { error: error.message });
+    await registrarLog(publicacionId, 'PUBLICACION_FALLIDA', 'ERROR', { 
+      error: typeof metaErrorDetails === 'object' ? JSON.stringify(metaErrorDetails) : metaErrorDetails 
+    });
 
     await sendMessage(
       chatId,
-      `❌ Error al publicar en la API de Instagram. Revisa las credenciales o el video.`
+      `❌ Error al publicar en Instagram:\n\`${JSON.stringify(metaErrorDetails)}\``
     );
   }
 }
