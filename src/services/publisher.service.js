@@ -46,29 +46,31 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       return;
     }
 
-    // 2. Obtener credenciales de Instagram para el cliente
+// 2. Obtener credenciales de Instagram para el cliente
     const { data: creds, error: credsErr } = await supabase
       .from('credenciales_redes')
       .select('*')
       .eq('cliente_id', publicacion.cliente_id)
-      .eq('plataforma', PLATFORMS.INSTAGRAM)
-      .single();
+      .eq('plataforma', 'instagram') // Garantizamos minúsculas
+      .maybeSingle();
 
     if (credsErr || !creds) {
-      const errorMsg = '⚠️ Publicación aprobada, pero el cliente no tiene tokens de Instagram vinculados.';
-      logger.warn(errorMsg, { clienteId: publicacion.cliente_id });
+      logger.error('Detalle error credenciales Supabase:', { 
+        credsErr, 
+        clienteIdBuscado: publicacion.cliente_id 
+      });
 
+      const errorMsg = '⚠️ Publicación aprobada, pero el cliente no tiene tokens de Instagram vinculados.';
+      
       await supabase
         .from('publicaciones')
         .update({ estado: POST_STATUS.APROBADO })
         .eq('id', publicacionId);
 
-      await registrarLog(publicacionId, 'FALLO_CREDENCIALES', 'WARN', { error: errorMsg });
+      await registrarLog(publicacionId, 'FALLO_CREDENCIALES', 'WARN', { error: errorMsg, credsErr });
       await sendMessage(chatId, errorMsg);
       return;
     }
-
-    await sendMessage(chatId, '⏳ Publicando contenido en Instagram...');
 
     // 3. Ejecutar publicación en Instagram
     const { postId } = await publicarEnInstagram(
