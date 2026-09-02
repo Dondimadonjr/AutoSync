@@ -19,7 +19,7 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
 }
 `;
 
-  const timeoutMs = 12000;
+  const timeoutMs = 15000;
   let timeoutId;
 
   const timeoutPromise = new Promise((_, reject) => {
@@ -32,7 +32,7 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
 
   try {
     const apiCallPromise = ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.6-flash',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -42,7 +42,6 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
     const response = await Promise.race([apiCallPromise, timeoutPromise]);
     clearTimeout(timeoutId);
 
-    // Extraer texto directamente de la respuesta del SDK
     const text = response.text;
     const parsed = typeof text === 'string' ? JSON.parse(text) : text;
 
