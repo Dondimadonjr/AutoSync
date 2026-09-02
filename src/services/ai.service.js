@@ -21,7 +21,7 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-3.5-flash-lite',
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -31,6 +31,7 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
     const text = response.text;
     const parsed = typeof text === 'string' ? JSON.parse(text) : text;
 
+    // Normalizar hashtags para garantizar que sea un array
     if (typeof parsed.hashtags === 'string') {
       parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
     } else if (!Array.isArray(parsed.hashtags)) {
@@ -39,7 +40,7 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
 
     return parsed;
   } catch (error) {
-    console.error('Error en Gemini:', error.message || error);
+    console.error('Error directo en Gemini:', error.message || error);
     throw new Error(`Error en el motor de IA: ${error.message || error}`);
   }
 }
