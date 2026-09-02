@@ -1,3 +1,4 @@
+require('dns').setDefaultResultOrder('ipv4first');
 const { GoogleGenAI } = require('@google/genai');
 require('dotenv').config();
 

@@ -1,3 +1,5 @@
+require('dns').setDefaultResultOrder('ipv4first');
+
 const express = require('express');
 const routes = require('../src/routes');
 const { errorHandler, notFoundHandler } = require('../src/middlewares/error.middleware');

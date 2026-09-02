@@ -1,4 +1,5 @@
 require('dotenv').config();
+require('dns').setDefaultResultOrder('ipv4first');
 
 const { GoogleGenAI } = require('@google/genai');
 
@@ -19,15 +20,15 @@ async function test() {
     });
 
     console.timeEnd('Gemini');
-
     console.log('Respuesta:', response.text);
   } catch (error) {
     console.timeEnd('Gemini');
-
     console.error('ERROR GEMINI');
-    console.error('status:', error?.status);
-    console.error('code:', error?.code);
     console.error('message:', error?.message);
+    console.error('cause:', error?.cause);       // <-- esto es lo que faltaba
+    console.error('cause.code:', error?.cause?.code);
+    console.error('cause.errno:', error?.cause?.errno);
+    console.error('stack:', error?.stack);
   }
 }
 
