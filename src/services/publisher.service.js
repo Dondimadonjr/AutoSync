@@ -46,31 +46,33 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       return;
     }
 
-// 2. Obtener credenciales de Instagram para el cliente
-    const { data: creds, error: credsErr } = await supabase
-      .from('credenciales_redes')
-      .select('*')
-      .eq('cliente_id', publicacion.cliente_id)
-      .eq('plataforma', 'instagram') // Garantizamos minúsculas
-      .maybeSingle();
+    // 2. Obtener credenciales de Instagram para el cliente
+        const { data: credsList, error: credsErr } = await supabase
+          .from('credenciales_redes')
+          .select('*')
+          .eq('cliente_id', publicacion.cliente_id)
+          .eq('plataforma', 'instagram')
+          .limit(1);
 
-    if (credsErr || !creds) {
-      logger.error('Detalle error credenciales Supabase:', { 
-        credsErr, 
-        clienteIdBuscado: publicacion.cliente_id 
-      });
+        const creds = credsList && credsList.length > 0 ? credsList[0] : null;
 
-      const errorMsg = '⚠️ Publicación aprobada, pero el cliente no tiene tokens de Instagram vinculados.';
-      
-      await supabase
-        .from('publicaciones')
-        .update({ estado: POST_STATUS.APROBADO })
-        .eq('id', publicacionId);
+        if (credsErr || !creds) {
+          logger.error('Detalle error credenciales Supabase:', { 
+            credsErr, 
+            clienteIdBuscado: publicacion.cliente_id 
+          });
 
-      await registrarLog(publicacionId, 'FALLO_CREDENCIALES', 'WARN', { error: errorMsg, credsErr });
-      await sendMessage(chatId, errorMsg);
-      return;
-    }
+          const errorMsg = '⚠️ Publicación aprobada, pero el cliente no tiene tokens de Instagram vinculados.';
+
+          await supabase
+            .from('publicaciones')
+            .update({ estado: POST_STATUS.APROBADO })
+            .eq('id', publicacionId);
+
+          await registrarLog(publicacionId, 'FALLO_CREDENCIALES', 'WARN', { error: errorMsg, credsErr });
+          await sendMessage(chatId, errorMsg);
+          return;
+        }
 
     // 3. Ejecutar publicación en Instagram
     const { postId } = await publicarEnInstagram(
