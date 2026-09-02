@@ -1,3 +1,4 @@
+const { waitUntil } = require('@vercel/functions');
 const supabase = require('../config/supabase');
 const env = require('../config/env');
 const logger = require('../config/logger');
@@ -8,19 +9,13 @@ const { registrarLog } = require('../services/publisher.service');
 
 /**
  * Endpoint POST /generar-post
- * Responde 202 Accepted de inmediato y ejecuta en segundo plano
+ * Responde 202 Accepted de inmediato y mantiene la función viva en Vercel con waitUntil
  */
 async function generarPost(req, res, _next) {
   const { clienteId, producto, descripcion, mediaUrl, chatId, plataformas } = req.body;
 
-  // 1. Responder INMEDIATAMENTE al cliente para evitar cualquier timeout de Vercel (<50ms)
-  res.status(202).json({
-    status: 'procesando',
-    message: 'Solicitud recibida. La propuesta se está generando en segundo plano y llegará a Telegram.',
-  });
-
-  // 2. Ejecutar la generación, persistencia y envío a Telegram en segundo plano
-  (async () => {
+  // 1. Definir la promesa de fondo que ejecutará Gemini + Supabase + Telegram
+  const tareaFondo = (async () => {
     try {
       logger.info('Iniciando procesamiento en segundo plano de post', { clienteId, producto });
 
@@ -41,7 +36,7 @@ async function generarPost(req, res, _next) {
         return;
       }
 
-      // Generar propuesta con Gemini
+      // Generar propuesta creativa con Gemini
       const propuesta = await generarPropuestaPublicacion(producto, descripcion);
       const captionCompleto = `${propuesta.caption}\n\n${propuesta.hashtags.join(' ')}`;
 
@@ -85,6 +80,17 @@ async function generarPost(req, res, _next) {
       });
     }
   })();
+
+  // 2. Notificar a Vercel que mantenga viva la ejecución hasta que tareaFondo termine
+  if (typeof waitUntil === 'function') {
+    waitUntil(tareaFondo);
+  }
+
+  // 3. Responder de inmediato al cliente HTTP (202 Accepted)
+  return res.status(202).json({
+    status: 'procesando',
+    message: 'Solicitud recibida. La propuesta se está generando en segundo plano y llegará a Telegram.',
+  });
 }
 
 module.exports = {
