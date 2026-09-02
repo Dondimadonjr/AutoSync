@@ -35,18 +35,17 @@ async function generarPost(req, res, next) {
       });
     }
 
-    // 2. Generar propuesta creativa con Gemini (con retry y validación Zod)
+    // 2. Generar propuesta creativa con Gemini
     const propuesta = await generarPropuestaPublicacion(producto, descripcion);
     const captionCompleto = `${propuesta.caption}\n\n${propuesta.hashtags.join(' ')}`;
 
-    // 3. Crear registro en Supabase
+    // 3. Crear registro en Supabase compatible con el esquema actual de publicaciones
     const { data: publicacion, error: dbError } = await supabase
       .from('publicaciones')
       .insert({
         cliente_id: clienteId,
         caption: captionCompleto,
         media_url: mediaUrl,
-        sugerencia_visual: propuesta.sugerencia_visual,
         plataformas: plataformas || ['instagram'],
         estado: POST_STATUS.BORRADOR,
       })
@@ -67,14 +66,6 @@ async function generarPost(req, res, next) {
       propuesta,
       mediaUrl
     );
-
-    // Guardar el message_id de Telegram para referencia
-    if (telegramRes?.result?.message_id) {
-      await supabase
-        .from('publicaciones')
-        .update({ telegram_message_id: telegramRes.result.message_id })
-        .eq('id', publicacion.id);
-    }
 
     logger.info('Propuesta enviada a Telegram exitosamente', {
       publicacionId: publicacion.id,

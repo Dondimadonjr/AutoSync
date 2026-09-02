@@ -5,7 +5,7 @@ const { publicarEnInstagram } = require('./meta.service');
 const { sendMessage } = require('./telegram.service');
 
 /**
- * Registra un evento en la tabla de auditoría logs_publicacion
+ * Registra un evento en la tabla de auditoría logs_publicacion si existe
  */
 async function registrarLog(publicacionId, evento, nivel = 'INFO', payload = {}) {
   try {
@@ -16,7 +16,8 @@ async function registrarLog(publicacionId, evento, nivel = 'INFO', payload = {})
       payload,
     });
   } catch (err) {
-    logger.warn('No se pudo guardar log en Supabase', { error: err.message });
+    // Si la tabla de logs no existe aún en la base de datos, ignorar silenciosamente
+    logger.debug('No se pudo guardar log en logs_publicacion', { error: err.message });
   }
 }
 
@@ -27,23 +28,23 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
   logger.info('Iniciando flujo de procesamiento de publicación', { publicacionId, chatId });
 
   try {
-    // 1. Bloqueo optimista: solo procesar si el estado es 'borrador'
+    // 1. Obtener la publicación actual de Supabase
     const { data: publicacion, error: fetchErr } = await supabase
       .from('publicaciones')
-      .update({ estado: POST_STATUS.PROCESANDO, updated_at: new Date().toISOString() })
+      .select('*, clientes(*)')
       .eq('id', publicacionId)
-      .eq('estado', POST_STATUS.BORRADOR)
-      .select()
       .single();
 
     if (fetchErr || !publicacion) {
-      logger.warn('Intento de procesar publicación no disponible o ya en curso', { publicacionId });
-      await sendMessage(chatId, '⚠️ Esta publicación ya fue procesada, aprobada previamente o rechazada.');
+      logger.warn('Publicación no encontrada en Supabase', { publicacionId });
+      await sendMessage(chatId, '❌ No se encontró la publicación.');
       return;
     }
 
-    await registrarLog(publicacionId, 'INICIO_PROCESAMIENTO', 'INFO', { chatId });
-    await sendMessage(chatId, '⏳ *Procesando video...*\nSubiendo y transcodificando en Meta Graph API.');
+    if (publicacion.estado === POST_STATUS.PUBLICADO) {
+      await sendMessage(chatId, '⚠️ Esta publicación ya fue publicada anteriormente.');
+      return;
+    }
 
     // 2. Obtener credenciales de Instagram para el cliente
     const { data: creds, error: credsErr } = await supabase
@@ -54,25 +55,23 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       .single();
 
     if (credsErr || !creds) {
-      const errorMsg = 'El cliente no tiene credenciales válidas de Instagram registradas.';
-      logger.error(errorMsg, { clienteId: publicacion.cliente_id });
+      const errorMsg = '⚠️ Publicación aprobada, pero el cliente no tiene tokens de Instagram vinculados.';
+      logger.warn(errorMsg, { clienteId: publicacion.cliente_id });
 
       await supabase
         .from('publicaciones')
-        .update({
-          estado: POST_STATUS.FALLIDO,
-          error_detalle: errorMsg,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ estado: POST_STATUS.APROBADO })
         .eq('id', publicacionId);
 
-      await registrarLog(publicacionId, 'FALLO_CREDENCIALES', 'ERROR', { error: errorMsg });
-      await sendMessage(chatId, `❌ *Fallo en la publicación:*\n${errorMsg}`);
+      await registrarLog(publicacionId, 'FALLO_CREDENCIALES', 'WARN', { error: errorMsg });
+      await sendMessage(chatId, errorMsg);
       return;
     }
 
+    await sendMessage(chatId, '⏳ Publicando contenido en Instagram...');
+
     // 3. Ejecutar publicación en Instagram
-    const { postId, containerId } = await publicarEnInstagram(
+    const { postId } = await publicarEnInstagram(
       creds.cuenta_id,
       creds.token_acceso,
       publicacion.media_url,
@@ -84,39 +83,33 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       .from('publicaciones')
       .update({
         estado: POST_STATUS.PUBLICADO,
-        instagram_container_id: containerId,
         instagram_post_id: postId,
-        error_detalle: null,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', publicacionId);
 
-    await registrarLog(publicacionId, 'PUBLICACION_EXITOSA', 'INFO', { postId, containerId });
+    await registrarLog(publicacionId, 'PUBLICACION_EXITOSA', 'INFO', { postId });
 
     await sendMessage(
       chatId,
-      `🎉 *¡Publicado exitosamente en Instagram!*\n\n🆔 *Post ID:* \`${postId}\`\n✅ Estado: *En línea*`
+      `🎉 ¡Publicado con éxito en Instagram! ID Post: \`${postId}\``
     );
   } catch (error) {
-    logger.error('Error durante la publicación en Instagram', {
+    logger.error('Error al publicar en Instagram', {
       publicacionId,
       error: error.message,
     });
 
+    // Mantener como aprobado en caso de error de red o de API de Meta
     await supabase
       .from('publicaciones')
-      .update({
-        estado: POST_STATUS.FALLIDO,
-        error_detalle: error.message,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ estado: POST_STATUS.APROBADO })
       .eq('id', publicacionId);
 
     await registrarLog(publicacionId, 'PUBLICACION_FALLIDA', 'ERROR', { error: error.message });
 
     await sendMessage(
       chatId,
-      `❌ *Error al publicar en Instagram:*\n_${error.message}_\n\nLa publicación quedó registrada como \`fallido\`.`
+      `❌ Error al publicar en la API de Instagram. Revisa las credenciales o el video.`
     );
   }
 }
@@ -130,7 +123,6 @@ async function procesarRechazo(publicacionId, chatId) {
       .from('publicaciones')
       .update({
         estado: POST_STATUS.RECHAZADO,
-        updated_at: new Date().toISOString(),
       })
       .eq('id', publicacionId);
 
@@ -139,7 +131,7 @@ async function procesarRechazo(publicacionId, chatId) {
     }
 
     await registrarLog(publicacionId, 'PUBLICACION_RECHAZADA', 'INFO', { chatId });
-    await sendMessage(chatId, `🚫 Publicación \`${publicacionId}\` rechazada por el usuario.`);
+    await sendMessage(chatId, `❌ Publicación \`${publicacionId}\` rechazada.`);
   } catch (err) {
     logger.error('Error al rechazar publicación', { publicacionId, error: err.message });
     await sendMessage(chatId, '❌ No se pudo actualizar el estado de rechazo en la base de datos.');
