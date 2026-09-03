@@ -9,7 +9,7 @@ const { META_GRAPH_BASE_URL } = require('../constants');
  * @param {number} maxAttempts Número máximo de sondeos
  * @param {number} intervalMs Milisegundos entre cada consulta
  */
-async function esperarContenedorListo(containerId, accessToken, maxAttempts = 12, intervalMs = 2500) {
+async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30, intervalMs = 3000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const response = await axios.get(`${META_GRAPH_BASE_URL}/${containerId}`, {
