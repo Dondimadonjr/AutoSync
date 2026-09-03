@@ -8,8 +8,9 @@ const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 // Lista de modelos ordenados por preferencia (Principal -> Secundarios)
 const MODELOS_DISPONIBLES = [
   'gemini-3.6-flash',
+  'gemini_2.5-flash',
   'gemini-2.0-flash',
-  'gemini-1.5-flash'
+  'gemini-1.5-flash',
 ];
 
 async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 'Instagram/TikTok') {
