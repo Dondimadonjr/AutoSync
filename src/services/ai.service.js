@@ -59,24 +59,22 @@ Responde ÚNICAMENTE en formato JSON estricto sin bloques de texto adicional:
         parsed.hashtags = [];
       }
 
-      logger.info(`Propuesta generada exitosamente con ${MODELO_OFICIAL}`, { producto });
+      logger.info(`Propuesta generada exitosamente en el intento ${intento} con ${MODELO_OFICIAL}`);
       return parsed;
 
     } catch (error) {
       ultimoError = error;
       logger.warn(`Error temporal en ${MODELO_OFICIAL} (Intento ${intento}/${MAX_INTENTOS}): ${error.message}`);
 
-      // Si es un error 503 (Servidor saturado), esperamos tiempo progresivo (2s, 4s) antes de reintentar
       if (intento < MAX_INTENTOS) {
-        const tiempoEspera = intento * 2000;
-        logger.info(`Pausando ${tiempoEspera}ms antes del siguiente intento...`);
-        await esperar(tiempoEspera);
+        logger.info(`Pausando 1000ms antes del siguiente intento...`);
+        await esperar(1000);
       }
     }
   }
 
   logger.error(`Todos los reintentos fallaron con ${MODELO_OFICIAL}:`, { error: ultimoError?.message });
-  throw new Error(`Los servidores de IA están saturados temporalmente (503). Por favor, intenta de nuevo en un par de minutos.`);
+  throw new Error(`Servidores de IA saturados temporalmente tras ${MAX_INTENTOS} intentos. Por favor, vuelve a enviar la imagen en unos segundos.`);
 }
 
 module.exports = { generarPropuestaPublicacion };
