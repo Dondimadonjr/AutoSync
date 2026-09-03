@@ -2,14 +2,11 @@ const { waitUntil } = require('@vercel/functions');
 const logger = require('../config/logger');
 const { sendMessage, answerCallbackQuery, enviarPropuestaInteractivamente } = require('../services/telegram.service');
 const { procesarAprobacionAsync, procesarRechazo } = require('../services/publisher.service');
-const { subirVideoDesdeTelegram } = require('../services/storage.service'); // Asegúrate que el archivo se llame storage.service.js
+const { subirVideoDesdeTelegram } = require('../services/storage.service');
 const { generarPropuestaPublicacion } = require('../services/ai.service');
 const supabase = require('../config/supabase');
 const { POST_STATUS } = require('../constants');
 
-/**
- * Endpoint POST /telegram-webhook
- */
 async function handleWebhook(req, res) {
   res.status(200).json({ ok: true });
 
@@ -22,13 +19,6 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, caption } = update.message;
         const chatId = chat.id;
 
-        const videoObj = update.message.video || update.message.document;
-
-      if (videoObj && videoObj.file_id) {
-        // Asegurarse de enviar videoObj.file_id directo del archivo principal
-        const mediaUrl = await subirVideoDesdeTelegram(videoObj.file_id);
-      }
-
         // A) Manejo de Videos/Documentos enviados al chat
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
 
@@ -37,33 +27,42 @@ async function handleWebhook(req, res) {
 
           await sendMessage(chatId, '📥 Video recibido. Subiéndolo a Supabase Storage y generando la propuesta con la IA...');
 
-          // 1. Subir a Supabase Storage
-          const mediaUrl = await subirVideoDesdeTelegram(videoArchivo.file_id);
+          try {
+            // 1. Subir a Supabase Storage
+            const mediaUrl = await subirVideoDesdeTelegram(videoArchivo.file_id);
 
-          // 2. Definir parámetros
-          const clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
-          const producto = 'Contenido Telegram';
-          const descripcion = caption || 'Publicación generada automáticamente desde Telegram';
+            // 2. Generar la propuesta con Gemini
+            const descripcion = caption || 'Publicación generada automáticamente desde Telegram';
+            const propuesta = await generarPropuestaPublicacion('Contenido Telegram', descripcion);
 
-          // 3. Generar la propuesta con Gemini
-          const propuesta = await generarPropuestaPublicacion({ producto, descripcion });
+            // 3. Buscar el primer cliente disponible en Supabase si el ID fijo no existe
+            let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
+            const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
+            if (clienteDB) {
+              clienteId = clienteDB.id;
+            }
 
-          // 4. Guardar en Supabase
-          const { data: nuevaPublicacion, error: dbError } = await supabase
-            .from('publicaciones')
-            .insert({
-              cliente_id: clienteId,
-              contenido: propuesta,
-              media_url: mediaUrl,
-              estado: POST_STATUS.PENDIENTE_APROBACION,
-            })
-            .select('id')
-            .single();
+            // 4. Guardar publicación en Supabase
+            const { data: nuevaPublicacion, error: dbError } = await supabase
+              .from('publicaciones')
+              .insert({
+                cliente_id: clienteId,
+                contenido: propuesta,
+                media_url: mediaUrl,
+                estado: POST_STATUS.PENDIENTE_APROBACION,
+              })
+              .select('id')
+              .single();
 
-          if (dbError) throw dbError;
+            if (dbError) throw dbError;
 
-          // 5. Enviar propuesta a Telegram con botones interactivos
-          await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
+            // 5. Enviar propuesta interactiva con botones a Telegram
+            await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
+
+          } catch (subError) {
+            logger.error('Error detallado procesando el video:', { error: subError.message, stack: subError.stack });
+            await sendMessage(chatId, `❌ Error durante el procesamiento: *${subError.message}*`);
+          }
           return;
         }
 
@@ -97,7 +96,7 @@ async function handleWebhook(req, res) {
         }
       }
     } catch (error) {
-      logger.error('Error en Telegram Webhook:', { error: error.message, stack: error.stack });
+      logger.error('Error general en Telegram Webhook:', { error: error.message, stack: error.stack });
     }
   })();
 
