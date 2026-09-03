@@ -58,7 +58,7 @@ async function enviarPropuestaInteractivamente(chatId, publicacionId, propuesta,
   const mensaje = 
     `<b>✨ NUEVA PROPUESTA DE CONTENIDO ✨</b>\n\n` +
     `<b>🎬 Idea del Video:</b>\n${propuesta.sugerencia_visual}\n\n` +
-    `<b>📝 Caption Sugerido:</b>\n${propuesta.caption}\n\n` +
+    `<b>📝 Descripción Sugerida:</b>\n${propuesta.caption}\n\n` +
     `<b>🏷️ Hashtags:</b>\n${hashtagsText}\n\n` +
     `<b>📎 Media:</b> <a href="${mediaUrl}">Ver archivo</a>`;
 

@@ -3,9 +3,9 @@ const logger = require('../config/logger');
 const { META_GRAPH_BASE_URL } = require('../constants');
 
 /**
- * Consulta el estado de procesamiento del contenedor de Reel/Video en Meta Graph API
+ * Consulta el estado de procesamiento del contenedor en Meta Graph API
  */
-async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30, intervalMs = 3000) {
+async function esperarContenedorListo(containerId, accessToken, maxAttempts = 20, intervalMs = 2000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       const response = await axios.get(`${META_GRAPH_BASE_URL}/${containerId}`, {
@@ -16,7 +16,7 @@ async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30
       });
 
       const { status_code, status } = response.data;
-      logger.info('Estado de transcodificación del contenedor en Meta', {
+      logger.info('Estado del contenedor en Meta', {
         containerId,
         attempt,
         status_code,
@@ -28,12 +28,12 @@ async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30
       }
 
       if (status_code === 'ERROR' || status_code === 'EXPIRED') {
-        throw new Error(`El contenedor de video falló en Meta con estado: ${status_code} (${status || 'Sin detalle'})`);
+        throw new Error(`El contenedor falló en Meta con estado: ${status_code} (${status || 'Sin detalle'})`);
       }
 
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     } catch (err) {
-      if (err.message.includes('El contenedor de video falló')) {
+      if (err.message.includes('El contenedor falló')) {
         throw err;
       }
       logger.warn(`Error sondeando estado del contenedor [${containerId}] intento ${attempt}`, {
@@ -43,7 +43,7 @@ async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30
     }
   }
 
-  throw new Error(`Tiempo de espera agotado (${(maxAttempts * intervalMs) / 1000}s) esperando que Meta procese el video.`);
+  throw new Error(`Tiempo de espera agotado esperando que Meta procese el archivo.`);
 }
 
 /**
@@ -54,12 +54,10 @@ function esImagen(url) {
   const urlLimpia = url.split('?')[0].toLowerCase();
   const extensionesVideo = ['.mp4', '.mov', '.avi', '.m4v', '.mkv'];
   
-  // Si termina en extensión de video explícita, no es foto
   if (extensionesVideo.some((ext) => urlLimpia.endsWith(ext))) {
     return false;
   }
 
-  // Por defecto, tratar imágenes (jpg, png, webp, etc.)
   return true;
 }
 
@@ -72,6 +70,7 @@ async function publicarEnInstagram(instagramAccountId, accessToken, mediaUrl, ca
   const maxAttempts = 3;
   const esFoto = esImagen(mediaUrl);
 
+  // 1. Crear el contenedor
   while (!containerId && attempts < maxAttempts) {
     attempts++;
     try {
@@ -103,18 +102,38 @@ async function publicarEnInstagram(instagramAccountId, accessToken, mediaUrl, ca
 
   logger.info('Contenedor creado exitosamente en Meta', { containerId, esFoto });
 
-  // Solo los videos/Reels requieren sondeo de transcodificación
+  // 2. Esperar que el contenedor esté listo
   if (!esFoto) {
     await esperarContenedorListo(containerId, accessToken);
+  } else {
+    // Breve pausa para asegurar la disponibilidad del contenedor de la imagen en los CDN de Meta
+    await new Promise((resolve) => setTimeout(resolve, 3000));
   }
 
-  // Publicar el contenedor en Instagram
-  const publishRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media_publish`, {
-    creation_id: containerId,
-    access_token: accessToken,
-  });
+  // 3. Publicar el contenedor con reintentos si Meta aún reporta "Media ID is not available"
+  let postId = null;
+  let publishAttempts = 0;
 
-  return { postId: publishRes.data.id, containerId };
+  while (!postId && publishAttempts < 3) {
+    publishAttempts++;
+    try {
+      const publishRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media_publish`, {
+        creation_id: containerId,
+        access_token: accessToken,
+      });
+      postId = publishRes.data.id;
+    } catch (pubError) {
+      const subcode = pubError.response?.data?.error?.error_subcode;
+      if (subcode === 2207027 && publishAttempts < 3) {
+        logger.warn(`El contenido aún no está listo (2207027). Reintentando publicación en 3s (Intento ${publishAttempts})...`);
+        await new Promise((res) => setTimeout(res, 3000));
+      } else {
+        throw pubError;
+      }
+    }
+  }
+
+  return { postId, containerId };
 }
 
 module.exports = {
