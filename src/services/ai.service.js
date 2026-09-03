@@ -5,14 +5,6 @@ const logger = require('../config/logger');
 
 const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
-// Lista de modelos ordenados por preferencia (Principal -> Secundarios)
-const MODELOS_DISPONIBLES = [
-  'gemini-3.6-flash',
-  'gemini_2.5-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash',
-];
-
 async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 'Instagram/TikTok') {
   let producto = input;
   let descripcion = descripcionCorta;
@@ -22,14 +14,14 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
     descripcion = input.descripcion || input.descripcionCorta || '';
   }
 
-  const prompt = `
+  const promptText = `
 Eres un experto en Marketing Digital para redes sociales.
-Genera un post optimizado sobre el siguiente producto/contenido:
-Tipo/Producto: ${producto}
+Genera un post optimizado para la siguiente publicación:
+Producto/Tipo: ${producto}
 Detalles: ${descripcion}
-Plataforma objetivo: ${redSocial}
+Plataforma: ${redSocial}
 
-Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
+Responde ÚNICAMENTE en formato JSON estricto sin bloques de texto adicional:
 {
   "caption": "Texto llamativo con llamadas a la acción (CTA) e emojis",
   "hashtags": ["#tag1", "#tag2", "#tag3"],
@@ -37,43 +29,33 @@ Responde ÚNICAMENTE en formato JSON estricto con la siguiente estructura:
 }
 `;
 
-  let ultimoError = null;
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: [{ role: 'user', parts: [{ text: promptText }] }],
+      config: {
+        responseMimeType: 'application/json',
+      },
+    });
 
-  // Reintentar dinámicamente en los modelos de respaldo
-  for (const modelo of MODELOS_DISPONIBLES) {
-    try {
-      logger.info(`Generando propuesta con modelo: ${modelo}`);
-      
-      const response = await ai.models.generateContent({
-        model: modelo,
-        contents: prompt,
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+    let rawText = response.text || '';
+    rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
 
-      let rawText = response.text || '';
-      rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const parsed = JSON.parse(rawText);
 
-      const parsed = JSON.parse(rawText);
-
-      if (typeof parsed.hashtags === 'string') {
-        parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
-      } else if (!Array.isArray(parsed.hashtags)) {
-        parsed.hashtags = [];
-      }
-
-      return parsed; // Éxito: retorna la propuesta al controlador
-
-    } catch (error) {
-      logger.warn(`Fallo temporal con el modelo ${modelo}:`, { error: error.message });
-      ultimoError = error;
-      // Continúa el ciclo 'for' e intenta con el siguiente modelo de la lista
+    if (typeof parsed.hashtags === 'string') {
+      parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
+    } else if (!Array.isArray(parsed.hashtags)) {
+      parsed.hashtags = [];
     }
-  }
 
-  // Si todos los modelos de la lista fallan, lanza el error final
-  throw new Error(`Los servidores de IA están saturados temporalmente. Por favor, reintenta en un momento.`);
+    logger.info('Propuesta generada exitosamente con gemini-3.6-flash', { producto });
+    return parsed;
+
+  } catch (error) {
+    logger.error('Error procesando respuesta en ai.service:', { error: error.message || error });
+    throw new Error(`Error en el motor de IA: ${error.message || error}`);
+  }
 }
 
 module.exports = { generarPropuestaPublicacion };
