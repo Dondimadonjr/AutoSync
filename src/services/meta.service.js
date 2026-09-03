@@ -3,7 +3,7 @@ const logger = require('../config/logger');
 const { META_GRAPH_BASE_URL } = require('../constants');
 
 /**
- * Consulta el estado de procesamiento del contenedor en Meta Graph API
+ * Consulta el estado de procesamiento del contenedor de Reel/Video en Meta Graph API
  */
 async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30, intervalMs = 3000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -50,9 +50,17 @@ async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30
  * Detecta si la URL o ruta pertenece a una imagen basándose en la extensión
  */
 function esImagen(url) {
-  const extensionesImagen = ['.jpg', '.jpeg', '.png', '.webp'];
+  if (!url) return false;
   const urlLimpia = url.split('?')[0].toLowerCase();
-  return extensionesImagen.some((ext) => urlLimpia.endsWith(ext));
+  const extensionesVideo = ['.mp4', '.mov', '.avi', '.m4v', '.mkv'];
+  
+  // Si termina en extensión de video explícita, no es foto
+  if (extensionesVideo.some((ext) => urlLimpia.endsWith(ext))) {
+    return false;
+  }
+
+  // Por defecto, tratar imágenes (jpg, png, webp, etc.)
+  return true;
 }
 
 /**
