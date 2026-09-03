@@ -3,11 +3,7 @@ const logger = require('../config/logger');
 const { META_GRAPH_BASE_URL } = require('../constants');
 
 /**
- * Consulta el estado de procesamiento del contenedor de Reels en Meta Graph API
- * @param {string} containerId ID del contenedor multimedia
- * @param {string} accessToken Token de acceso
- * @param {number} maxAttempts Número máximo de sondeos
- * @param {number} intervalMs Milisegundos entre cada consulta
+ * Consulta el estado de procesamiento del contenedor en Meta Graph API
  */
 async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30, intervalMs = 3000) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -35,7 +31,6 @@ async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30
         throw new Error(`El contenedor de video falló en Meta con estado: ${status_code} (${status || 'Sin detalle'})`);
       }
 
-      // Si sigue IN_PROGRESS, esperar para el siguiente intento
       await new Promise((resolve) => setTimeout(resolve, intervalMs));
     } catch (err) {
       if (err.message.includes('El contenedor de video falló')) {
@@ -52,45 +47,60 @@ async function esperarContenedorListo(containerId, accessToken, maxAttempts = 30
 }
 
 /**
- * Publica un Reel en una cuenta de Instagram Business
- * @param {string} instagramAccountId ID de la cuenta de Instagram Business
- * @param {string} accessToken Token de acceso (System User Token o Long-Lived Token)
- * @param {string} videoUrl URL pública directa del video
- * @param {string} caption Texto del post con hashtags
- * @returns {Promise<{ postId: string, containerId: string }>}
+ * Detecta si la URL o ruta pertenece a una imagen basándose en la extensión
  */
-async function publicarEnInstagram(instagramAccountId, accessToken, videoUrl, caption) {
+function esImagen(url) {
+  const extensionesImagen = ['.jpg', '.jpeg', '.png', '.webp'];
+  const urlLimpia = url.split('?')[0].toLowerCase();
+  return extensionesImagen.some((ext) => urlLimpia.endsWith(ext));
+}
+
+/**
+ * Publica una foto o Reel en una cuenta de Instagram Business de forma dinámica
+ */
+async function publicarEnInstagram(instagramAccountId, accessToken, mediaUrl, caption) {
   let containerId = null;
   let attempts = 0;
   const maxAttempts = 3;
+  const esFoto = esImagen(mediaUrl);
 
-  // Intentar crear el contenedor con reintentos si Meta falla la descarga
   while (!containerId && attempts < maxAttempts) {
     attempts++;
     try {
-      logger.info(`Intento ${attempts} de creación de contenedor en Meta...`);
-      
-      const containerRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media`, {
-        media_type: 'REELS',
-        video_url: videoUrl,
-        caption,
-        access_token: accessToken,
-      });
+      logger.info(`Intento ${attempts} de creación de contenedor en Meta (${esFoto ? 'IMAGE' : 'REELS'})...`);
 
+      const payload = esFoto
+        ? {
+            image_url: mediaUrl,
+            caption,
+            access_token: accessToken,
+          }
+        : {
+            media_type: 'REELS',
+            video_url: mediaUrl,
+            caption,
+            access_token: accessToken,
+          };
+
+      const containerRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media`, payload);
       containerId = containerRes.data.id;
     } catch (error) {
       if (attempts >= maxAttempts) throw error;
-      logger.warn(`Fallo al crear contenedor (Intento ${attempts}). Reintentando en 3s...`);
+      logger.warn(`Fallo al crear contenedor (Intento ${attempts}). Reintentando en 3s...`, {
+        error: error.response?.data || error.message,
+      });
       await new Promise((res) => setTimeout(res, 3000));
     }
   }
 
-  logger.info('Contenedor creado exitosamente en Meta', { containerId });
+  logger.info('Contenedor creado exitosamente en Meta', { containerId, esFoto });
 
-  // Esperar a que el procesamiento transcodifique el video
-  await esperarContenedorListo(containerId, accessToken);
+  // Solo los videos/Reels requieren sondeo de transcodificación
+  if (!esFoto) {
+    await esperarContenedorListo(containerId, accessToken);
+  }
 
-  // Publicar Reel
+  // Publicar el contenedor en Instagram
   const publishRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media_publish`, {
     creation_id: containerId,
     access_token: accessToken,
