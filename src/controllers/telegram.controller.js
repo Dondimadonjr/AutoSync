@@ -31,22 +31,23 @@ async function handleWebhook(req, res) {
             // 1. Subir a Supabase Storage
             const mediaUrl = await subirVideoDesdeTelegram(videoArchivo.file_id);
 
-            const captionTexto = typeof propuesta === 'object' 
-            ? `${propuesta.caption}\n\n${Array.isArray(propuesta.hashtags) ? propuesta.hashtags.join(' ') : ''}`
-            : propuesta;
-
-            // 2. Generar la propuesta con Gemini
+            // 2. Generar la propuesta con Gemini (PRIMERO)
             const descripcion = caption || 'Publicación generada automáticamente desde Telegram';
             const propuesta = await generarPropuestaPublicacion('Contenido Telegram', descripcion);
 
-            // 3. Buscar el primer cliente disponible en Supabase si el ID fijo no existe
+            // 3. Formatear el captionTexto DESPUÉS de obtener la propuesta
+            const captionTexto = typeof propuesta === 'object' 
+              ? `${propuesta.caption}\n\n${Array.isArray(propuesta.hashtags) ? propuesta.hashtags.join(' ') : ''}`
+              : propuesta;
+
+            // 4. Buscar el primer cliente disponible en Supabase si el ID fijo no existe
             let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
             const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
             if (clienteDB) {
               clienteId = clienteDB.id;
             }
 
-            // 4. Guardar publicación en Supabase
+            // 5. Guardar publicación en Supabase en la columna 'caption'
             const { data: nuevaPublicacion, error: dbError } = await supabase
               .from('publicaciones')
               .insert({
@@ -60,7 +61,7 @@ async function handleWebhook(req, res) {
 
             if (dbError) throw dbError;
 
-            // 5. Enviar propuesta interactiva con botones a Telegram
+            // 6. Enviar propuesta interactiva con botones a Telegram
             await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
 
           } catch (subError) {
