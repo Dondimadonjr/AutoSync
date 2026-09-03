@@ -54,6 +54,7 @@ async function handleWebhook(req, res) {
                 cliente_id: clienteId,
                 caption: captionTexto,
                 media_url: mediaUrl,
+                plataformas: ['instagram'], // <-- AGREGAR ESTA LÍNEA (tipo ARRAY de texto)
                 estado: POST_STATUS.PENDIENTE_APROBACION,
               })
               .select('id')
