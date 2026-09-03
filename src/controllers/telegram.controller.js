@@ -31,6 +31,10 @@ async function handleWebhook(req, res) {
             // 1. Subir a Supabase Storage
             const mediaUrl = await subirVideoDesdeTelegram(videoArchivo.file_id);
 
+            const captionTexto = typeof propuesta === 'object' 
+            ? `${propuesta.caption}\n\n${Array.isArray(propuesta.hashtags) ? propuesta.hashtags.join(' ') : ''}`
+            : propuesta;
+
             // 2. Generar la propuesta con Gemini
             const descripcion = caption || 'Publicación generada automáticamente desde Telegram';
             const propuesta = await generarPropuestaPublicacion('Contenido Telegram', descripcion);
@@ -47,7 +51,7 @@ async function handleWebhook(req, res) {
               .from('publicaciones')
               .insert({
                 cliente_id: clienteId,
-                contenido: propuesta,
+                caption: captionTexto,
                 media_url: mediaUrl,
                 estado: POST_STATUS.PENDIENTE_APROBACION,
               })
