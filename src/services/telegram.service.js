@@ -61,10 +61,11 @@ async function enviarPropuestaInteractivamente(chatId, publicacionId, propuesta,
   const keyboard = {
     inline_keyboard: [
       [
-        { text: '✅ Aprobar y Publicar', callback_data: `aprobar_${publicacionId}` },
-        { text: '✏️ Editar Caption', callback_data: `editar_${publicacionId}` },
+        { text: '✅ Publicar Ahora', callback_data: `aprobar_${publicacionId}` },
+        { text: '📅 Programar', callback_data: `agendar_${publicacionId}` },
       ],
       [
+        { text: '✏️ Editar Caption', callback_data: `editar_${publicacionId}` },
         { text: '❌ Rechazar', callback_data: `rechazar_${publicacionId}` },
       ],
     ],

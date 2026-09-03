@@ -6,7 +6,10 @@ const { subirVideoDesdeTelegram } = require('../services/storage.service');
 const { generarPropuestaPublicacion } = require('../services/ai.service');
 const supabase = require('../config/supabase');
 const { POST_STATUS } = require('../constants');
+
+// Mapas en memoria para rastrear los estados por usuario (chatId)
 const estadosEdicion = new Map();
+const estadosProgramacion = new Map();
 
 async function handleWebhook(req, res) {
   res.status(200).json({ ok: true });
@@ -20,12 +23,44 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        // 1. Si el usuario está respondiendo para EDITAR un caption
+        // 1. Manejo de texto enviado para PROGRAMAR fecha
+        if (text && estadosProgramacion.has(chatId)) {
+          const publicacionId = estadosProgramacion.get(chatId);
+          estadosProgramacion.delete(chatId);
+
+          const fechaProgramada = new Date(text.trim());
+
+          if (isNaN(fechaProgramada.getTime())) {
+            await sendMessage(
+              chatId,
+              '❌ *Formato de fecha inválido.* Por favor escribe la fecha con el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-05 18:30`).'
+            );
+            return;
+          }
+
+          // Actualizar en Supabase con la fecha elegida y cambiar el estado
+          const { error: updateError } = await supabase
+            .from('publicaciones')
+            .update({
+              programado_para: fechaProgramada.toISOString(),
+              estado: POST_STATUS.PROGRAMADO || 'PROGRAMADO',
+            })
+            .eq('id', publicacionId);
+
+          if (updateError) throw updateError;
+
+          await sendMessage(
+            chatId,
+            `📅 *Publicación programada exitosamente.*\n\nSe enviará a tus redes el: *${fechaProgramada.toLocaleString('es-ES')}*`
+          );
+          return;
+        }
+
+        // 2. Manejo de texto enviado para EDITAR el caption
         if (text && estadosEdicion.has(chatId)) {
           const publicacionId = estadosEdicion.get(chatId);
-          estadosEdicion.delete(chatId); // Limpiar estado
+          estadosEdicion.delete(chatId);
 
-          // Actualizar caption en Supabase
           const { data: pubActualizada, error: updateError } = await supabase
             .from('publicaciones')
             .update({ caption: text })
@@ -36,19 +71,23 @@ async function handleWebhook(req, res) {
           if (updateError) throw updateError;
 
           await sendMessage(chatId, '✅ *Caption actualizado con éxito.* Revisa la nueva versión:');
-          
-          // Reenviar propuesta con los nuevos botones
-          await enviarPropuestaInteractivamente(chatId, pubActualizada.id, pubActualizada.caption, pubActualizada.media_url);
+
+          await enviarPropuestaInteractivamente(
+            chatId,
+            pubActualizada.id,
+            pubActualizada.caption,
+            pubActualizada.media_url
+          );
           return;
         }
 
-        // 2. Manejo de Videos/Fotos/Documentos
+        // 3. Manejo de subida de Multimedia (Videos / Fotos / Documentos)
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
         const fotoArchivo = photo ? photo[photo.length - 1] : null;
         const archivoMultimedia = videoArchivo || fotoArchivo;
 
         if (archivoMultimedia) {
-          logger.info('Archivo recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id });
+          logger.info('Archivo multimedia recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id });
           await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando la propuesta con la IA...');
 
           try {
@@ -88,7 +127,7 @@ async function handleWebhook(req, res) {
           return;
         }
 
-        // 3. Manejo de /start
+        // 4. Manejo del comando /start
         if (text && text.startsWith('/start')) {
           await sendMessage(
             chatId,
@@ -100,7 +139,7 @@ async function handleWebhook(req, res) {
         }
       }
 
-      // 4. Manejo de Botones
+      // 5. Manejo de Botones Interactivos (Callback Query)
       if (update.callback_query) {
         const { id: callbackQueryId, message, data } = update.callback_query;
         const chatId = message.chat.id;
@@ -113,9 +152,18 @@ async function handleWebhook(req, res) {
 
         if (accion === 'aprobar') {
           await procesarAprobacionAsync(publicacionId, chatId);
+        } else if (accion === 'agendar') {
+          // Activar flujo de programación
+          estadosProgramacion.set(chatId, publicacionId);
+          estadosEdicion.delete(chatId); // Asegurar que no interfiera con edición
+          await sendMessage(
+            chatId,
+            `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 18:30\``
+          );
         } else if (accion === 'editar') {
-          // Guardar estado de edición
+          // Activar flujo de edición
           estadosEdicion.set(chatId, publicacionId);
+          estadosProgramacion.delete(chatId); // Asegurar que no interfiera con programación
           await sendMessage(
             chatId,
             `✏️ *Modo edición activado.*\n\nEscribe y envía el nuevo texto/caption que deseas colocar en esta publicación:`
