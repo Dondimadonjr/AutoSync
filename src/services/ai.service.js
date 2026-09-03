@@ -5,16 +5,9 @@ const logger = require('../config/logger');
 
 const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
-// Modelos válidos en la SDK @google/genai para reintentos
-const MODELOS_DISPONIBLES = [
-  'gemini-3.6-flash',
-  'gemini-2.0-flash',
-  'gemini-1.5-flash'
-];
+const MODELO_OFICIAL = 'gemini-3.6-flash';
+const MAX_INTENTOS = 3;
 
-/**
- * Función auxiliar para pausar la ejecución en ms
- */
 const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 'Instagram/TikTok') {
@@ -43,47 +36,47 @@ Responde ÚNICAMENTE en formato JSON estricto sin bloques de texto adicional:
 
   let ultimoError = null;
 
-  // Recorrer los modelos de respaldo
-  for (const modelo of MODELOS_DISPONIBLES) {
-    // Intentar hasta 2 veces por cada modelo
-    for (let intento = 1; intento <= 2; intento++) {
-      try {
-        logger.info(`Intento ${intento} con modelo ${modelo}`);
+  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
+    try {
+      logger.info(`Intento ${intento} con modelo ${MODELO_OFICIAL}`);
 
-        const response = await ai.models.generateContent({
-          model: modelo,
-          contents: [{ role: 'user', parts: [{ text: promptText }] }],
-          config: {
-            responseMimeType: 'application/json',
-          },
-        });
+      const response = await ai.models.generateContent({
+        model: MODELO_OFICIAL,
+        contents: [{ role: 'user', parts: [{ text: promptText }] }],
+        config: {
+          responseMimeType: 'application/json',
+        },
+      });
 
-        let rawText = response.text || '';
-        rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      let rawText = response.text || '';
+      rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
 
-        const parsed = JSON.parse(rawText);
+      const parsed = JSON.parse(rawText);
 
-        if (typeof parsed.hashtags === 'string') {
-          parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
-        } else if (!Array.isArray(parsed.hashtags)) {
-          parsed.hashtags = [];
-        }
+      if (typeof parsed.hashtags === 'string') {
+        parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
+      } else if (!Array.isArray(parsed.hashtags)) {
+        parsed.hashtags = [];
+      }
 
-        logger.info('Propuesta generada exitosamente con ' + modelo, { producto });
-        return parsed;
+      logger.info(`Propuesta generada exitosamente con ${MODELO_OFICIAL}`, { producto });
+      return parsed;
 
-      } catch (error) {
-        ultimoError = error;
-        logger.warn(`Error temporal en ${modelo} (Intento ${intento}): ${error.message}`);
-        
-        // Esperar 1.5 segundos antes de reintentar si el servidor está saturado
-        if (intento < 2) await esperar(1500);
+    } catch (error) {
+      ultimoError = error;
+      logger.warn(`Error temporal en ${MODELO_OFICIAL} (Intento ${intento}/${MAX_INTENTOS}): ${error.message}`);
+
+      // Si es un error 503 (Servidor saturado), esperamos tiempo progresivo (2s, 4s) antes de reintentar
+      if (intento < MAX_INTENTOS) {
+        const tiempoEspera = intento * 2000;
+        logger.info(`Pausando ${tiempoEspera}ms antes del siguiente intento...`);
+        await esperar(tiempoEspera);
       }
     }
   }
 
-  logger.error('Todos los modelos y reintentos fallaron:', { error: ultimoError?.message });
-  throw new Error(`Los servidores de IA están saturados temporalmente. Por favor, reintenta en un momento.`);
+  logger.error(`Todos los reintentos fallaron con ${MODELO_OFICIAL}:`, { error: ultimoError?.message });
+  throw new Error(`Los servidores de IA están saturados temporalmente (503). Por favor, intenta de nuevo en un par de minutos.`);
 }
 
 module.exports = { generarPropuestaPublicacion };
