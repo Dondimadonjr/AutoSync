@@ -3,7 +3,9 @@ const axios = require('axios');
 const env = require('../config/env');
 const logger = require('../config/logger');
 
-const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY);
+// Usar obligatoriamente la Service Role Key para ignorar RLS en subidas
+const supabaseKey = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_ANON_KEY;
+const supabase = createClient(env.SUPABASE_URL, supabaseKey);
 
 /**
  * Descarga un archivo multimedia de Telegram y lo sube a Supabase Storage.
