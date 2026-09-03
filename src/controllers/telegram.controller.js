@@ -145,7 +145,7 @@ async function handleWebhook(req, res) {
             chatId,
             `¡Hola, *${from?.first_name || 'Usuario'}*! 👋\n\n` +
               `Bienvenido a *SocialSync AI Engine* 🤖.\n\n` +
-              `Envía cualquier video con una breve descripción para generar y publicar tu Reel en Instagram.`
+              `Envía cualquier video o imagen con una breve descripción para generar y publicar tu Reel/publicación en Redes Sociales.`
           );
           return;
         }
