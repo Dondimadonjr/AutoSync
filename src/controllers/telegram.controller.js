@@ -6,6 +6,7 @@ const { subirVideoDesdeTelegram } = require('../services/storage.service');
 const { generarPropuestaPublicacion } = require('../services/ai.service');
 const supabase = require('../config/supabase');
 const { POST_STATUS } = require('../constants');
+const estadosEdicion = new Map();
 
 async function handleWebhook(req, res) {
   res.status(200).json({ ok: true });
@@ -16,112 +17,61 @@ async function handleWebhook(req, res) {
   const tareaWebhook = (async () => {
     try {
       if (update.message) {
-        const { text, chat, from, video, document, caption } = update.message;
+        const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        if (update.message) {
-          const { text, chat, from, video, document, photo, caption } = update.message;
-          const chatId = chat.id;
+        // 1. Si el usuario está respondiendo para EDITAR un caption
+        if (text && estadosEdicion.has(chatId)) {
+          const publicacionId = estadosEdicion.get(chatId);
+          estadosEdicion.delete(chatId); // Limpiar estado
 
-          // 1. Detectar Video, Documento o Foto (Telegram envía photo como un arreglo de tamaños)
-          const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
-          const fotoArchivo = photo ? photo[photo.length - 1] : null; // Toma la foto de mayor resolución
+          // Actualizar caption en Supabase
+          const { data: pubActualizada, error: updateError } = await supabase
+            .from('publicaciones')
+            .update({ caption: text })
+            .eq('id', publicacionId)
+            .select('*')
+            .single();
 
-          const archivoMultimedia = videoArchivo || fotoArchivo;
+          if (updateError) throw updateError;
 
-          if (archivoMultimedia) {
-            logger.info('Archivo multimedia recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id });
-
-            await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando la propuesta con la IA...');
-
-            try {
-              // 2. Subir imagen o video a Supabase Storage
-              const mediaUrl = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
-
-              // 3. Adaptar el prompt de la IA según el tipo de contenido
-              const tipoContenido = fotoArchivo ? 'Imagen para Instagram' : 'Reel de Instagram';
-              const descripcion = caption || 'Publicación visual llamativa para redes sociales';
-
-              const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
-
-              const captionTexto = typeof propuesta === 'object' 
-                ? `${propuesta.caption}\n\n${Array.isArray(propuesta.hashtags) ? propuesta.hashtags.join(' ') : ''}`
-                : propuesta;
-
-              // 4. Buscar cliente
-              let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
-              const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
-              if (clienteDB) clienteId = clienteDB.id;
-
-              // 5. Guardar en Supabase
-              const { data: nuevaPublicacion, error: dbError } = await supabase
-                .from('publicaciones')
-                .insert({
-                  cliente_id: clienteId,
-                  caption: captionTexto,
-                  media_url: mediaUrl,
-                  plataformas: ['instagram'],
-                  estado: POST_STATUS.PENDIENTE_APROBACION,
-                })
-                .select('id')
-                .single();
-
-              if (dbError) throw dbError;
-
-              // 6. Enviar respuesta interactiva
-              await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
-
-            } catch (subError) {
-              logger.error('Error procesando multimedia:', { error: subError.message });
-              await sendMessage(chatId, `❌ Error durante el procesamiento: *${subError.message}*`);
-            }
-            return;
-          }
+          await sendMessage(chatId, '✅ *Caption actualizado con éxito.* Revisa la nueva versión:');
+          
+          // Reenviar propuesta con los nuevos botones
+          await enviarPropuestaInteractivamente(chatId, pubActualizada.id, pubActualizada.caption, pubActualizada.media_url);
+          return;
         }
 
-        // A) Manejo de Videos/Documentos enviados al chat
+        // 2. Manejo de Videos/Fotos/Documentos
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
+        const fotoArchivo = photo ? photo[photo.length - 1] : null;
+        const archivoMultimedia = videoArchivo || fotoArchivo;
 
-        if (videoArchivo) {
-          logger.info('Video recibido en Telegram Webhook', { chatId, fileId: videoArchivo.file_id });
-
-          await sendMessage(chatId, '📥 Video recibido. Subiéndolo a Supabase Storage y generando la propuesta con la IA...');
+        if (archivoMultimedia) {
+          logger.info('Archivo recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id });
+          await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando la propuesta con la IA...');
 
           try {
-            // 1. Subir a Supabase Storage
-            const mediaUrl = await subirVideoDesdeTelegram(videoArchivo.file_id);
+            const mediaUrl = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
+            const tipoContenido = fotoArchivo ? 'Imagen para Instagram' : 'Reel de Instagram';
+            const descripcion = caption || 'Publicación visual atractiva para redes sociales';
 
-            // 2. Generar la propuesta con Gemini (PRIMERO)
-            // 2. Usar el texto introducido en Telegram o un texto general si viene vacío
-              const descripcionVideo = caption || 'Video corto con momentos destacados y contenido atractivo para redes sociales';
-
-              // 3. Generar la propuesta pasando el texto dinámico
-              const propuesta = await generarPropuestaPublicacion(
-                'Reel de Instagram', // Nombre del tipo de contenido
-                descripcionVideo,    // Texto enviado como leyenda en Telegram
-                'Instagram Reels'    // Red social de destino
-              );
-
-            // 3. Formatear el captionTexto DESPUÉS de obtener la propuesta
-            const captionTexto = typeof propuesta === 'object' 
+            const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
+            const captionTexto = typeof propuesta === 'object'
               ? `${propuesta.caption}\n\n${Array.isArray(propuesta.hashtags) ? propuesta.hashtags.join(' ') : ''}`
               : propuesta;
 
-            // 4. Buscar el primer cliente disponible en Supabase si el ID fijo no existe
             let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
             const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
-            if (clienteDB) {
-              clienteId = clienteDB.id;
-            }
+            if (clienteDB) clienteId = clienteDB.id;
 
-            // 5. Guardar publicación en Supabase en la columna 'caption'
             const { data: nuevaPublicacion, error: dbError } = await supabase
               .from('publicaciones')
               .insert({
                 cliente_id: clienteId,
                 caption: captionTexto,
                 media_url: mediaUrl,
-                plataformas: ['instagram'], // <-- AGREGAR ESTA LÍNEA (tipo ARRAY de texto)
+                plataformas: ['instagram'],
                 estado: POST_STATUS.PENDIENTE_APROBACION,
               })
               .select('id')
@@ -129,29 +79,28 @@ async function handleWebhook(req, res) {
 
             if (dbError) throw dbError;
 
-            // 6. Enviar propuesta interactiva con botones a Telegram
             await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
 
           } catch (subError) {
-            logger.error('Error detallado procesando el video:', { error: subError.message, stack: subError.stack });
+            logger.error('Error procesando multimedia:', { error: subError.message });
             await sendMessage(chatId, `❌ Error durante el procesamiento: *${subError.message}*`);
           }
           return;
         }
 
-        // B) Manejo de /start
+        // 3. Manejo de /start
         if (text && text.startsWith('/start')) {
           await sendMessage(
             chatId,
             `¡Hola, *${from?.first_name || 'Usuario'}*! 👋\n\n` +
               `Bienvenido a *SocialSync AI Engine* 🤖.\n\n` +
-              `Envía cualquier video o imagen con una breve descripción para generar y publicar tu Reel/publicación en Redes Sociales.`
+              `Envía cualquier video o foto con una breve leyenda para generar y publicar tu post.`
           );
           return;
         }
       }
 
-      // C) Manejo de Botones
+      // 4. Manejo de Botones
       if (update.callback_query) {
         const { id: callbackQueryId, message, data } = update.callback_query;
         const chatId = message.chat.id;
@@ -164,6 +113,13 @@ async function handleWebhook(req, res) {
 
         if (accion === 'aprobar') {
           await procesarAprobacionAsync(publicacionId, chatId);
+        } else if (accion === 'editar') {
+          // Guardar estado de edición
+          estadosEdicion.set(chatId, publicacionId);
+          await sendMessage(
+            chatId,
+            `✏️ *Modo edición activado.*\n\nEscribe y envía el nuevo texto/caption que deseas colocar en esta publicación:`
+          );
         } else if (accion === 'rechazar') {
           await procesarRechazo(publicacionId, chatId);
         }

@@ -50,30 +50,29 @@ async function answerCallbackQuery(callbackQueryId, text = null, showAlert = fal
  * Envía una propuesta interactiva con botones inline de Aprobación/Rechazo
  */
 async function enviarPropuestaInteractivamente(chatId, publicacionId, propuesta, mediaUrl) {
-  // Construir caption con HTML para evitar problemas de caracteres especiales
-  const hashtagsText = Array.isArray(propuesta.hashtags) 
-    ? propuesta.hashtags.join(' ') 
-    : propuesta.hashtags;
+  const captionTexto = typeof propuesta === 'object'
+    ? `${propuesta.caption}\n\n${Array.isArray(propuesta.hashtags) ? propuesta.hashtags.join(' ') : ''}`
+    : propuesta;
 
-  const mensaje = 
-    `<b>✨ NUEVA PROPUESTA DE CONTENIDO ✨</b>\n\n` +
-    `<b>🎬 Idea del Video:</b>\n${propuesta.sugerencia_visual}\n\n` +
-    `<b>📝 Descripción Sugerida:</b>\n${propuesta.caption}\n\n` +
-    `<b>🏷️ Hashtags:</b>\n${hashtagsText}\n\n` +
-    `<b>📎 Media:</b> <a href="${mediaUrl}">Ver archivo</a>`;
+  const mensaje = `✨ *NUEVA PROPUESTA DE CONTENIDO* ✨\n\n` +
+    `📝 *Caption Sugerido:*\n${captionTexto}\n\n` +
+    `📎 *Media:* [Ver archivo](${mediaUrl})`;
 
-  const reply_markup = {
+  const keyboard = {
     inline_keyboard: [
       [
         { text: '✅ Aprobar y Publicar', callback_data: `aprobar_${publicacionId}` },
+        { text: '✏️ Editar Caption', callback_data: `editar_${publicacionId}` },
+      ],
+      [
         { text: '❌ Rechazar', callback_data: `rechazar_${publicacionId}` },
       ],
     ],
   };
 
-  return await sendMessage(chatId, mensaje, {
-    parse_mode: 'HTML',
-    reply_markup,
+  await sendMessage(chatId, mensaje, {
+    parse_mode: 'Markdown',
+    reply_markup: keyboard,
   });
 }
 
