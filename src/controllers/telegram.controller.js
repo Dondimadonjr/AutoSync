@@ -23,7 +23,7 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        // 1. Manejo de texto enviado para PROGRAMAR fecha
+        // 1. Manejo de texto enviado para PROGRAMAR / REPROGRAMAR fecha
         if (text && estadosProgramacion.has(chatId)) {
           const publicacionId = estadosProgramacion.get(chatId);
           estadosProgramacion.delete(chatId);
@@ -38,20 +38,31 @@ async function handleWebhook(req, res) {
             return;
           }
 
-          // Actualizar en Supabase con la fecha elegida y cambiar el estado
-          const { error: updateError } = await supabase
+          // Actualizar en Supabase con la fecha elegida
+          const { data: pubActualizada, error: updateError } = await supabase
             .from('publicaciones')
             .update({
               programado_para: fechaProgramada.toISOString(),
               estado: POST_STATUS.PROGRAMADO || 'PROGRAMADO',
             })
-            .eq('id', publicacionId);
+            .eq('id', publicacionId)
+            .select('*')
+            .single();
 
           if (updateError) throw updateError;
 
           await sendMessage(
             chatId,
-            `📅 *Publicación programada exitosamente.*\n\nSe enviará a tus redes el: *${fechaProgramada.toLocaleString('es-ES')}*`
+            `📅 *Publicación programada exitosamente para:* *${fechaProgramada.toLocaleString('es-ES')}*\n\n` +
+            `Si deseas cambiar la fecha o editar el texto antes de publicarse, usa los botones a continuación:`
+          );
+
+          // Reenviar panel interactivo para permitir reprogramaciones o ediciones continuas
+          await enviarPropuestaInteractivamente(
+            chatId,
+            pubActualizada.id,
+            pubActualizada.caption,
+            pubActualizada.media_url
           );
           return;
         }
@@ -153,17 +164,17 @@ async function handleWebhook(req, res) {
         if (accion === 'aprobar') {
           await procesarAprobacionAsync(publicacionId, chatId);
         } else if (accion === 'agendar') {
-          // Activar flujo de programación
+          // Activar flujo de programación / reprogramación
           estadosProgramacion.set(chatId, publicacionId);
-          estadosEdicion.delete(chatId); // Asegurar que no interfiera con edición
+          estadosEdicion.delete(chatId);
           await sendMessage(
             chatId,
             `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 18:30\``
           );
         } else if (accion === 'editar') {
-          // Activar flujo de edición
+          // Activar flujo de edición de caption
           estadosEdicion.set(chatId, publicacionId);
-          estadosProgramacion.delete(chatId); // Asegurar que no interfiera con programación
+          estadosProgramacion.delete(chatId);
           await sendMessage(
             chatId,
             `✏️ *Modo edición activado.*\n\nEscribe y envía el nuevo texto/caption que deseas colocar en esta publicación:`
