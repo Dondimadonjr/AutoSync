@@ -51,7 +51,10 @@ async function subirVideoDesdeTelegram(fileId, botToken) {
 
     return publicUrlData.publicUrl;
   } catch (error) {
-    logger.error('Error al subir video desde Telegram a Supabase Storage:', error);
+    logger.error('Error al subir video desde Telegram a Supabase Storage:', {
+      mensaje: error.message,
+      detalles: error.response?.data || error,
+    });
     throw error;
   }
 }
