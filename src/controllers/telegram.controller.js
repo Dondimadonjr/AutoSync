@@ -22,6 +22,13 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, caption } = update.message;
         const chatId = chat.id;
 
+        const videoObj = update.message.video || update.message.document;
+
+      if (videoObj && videoObj.file_id) {
+        // Asegurarse de enviar videoObj.file_id directo del archivo principal
+        const mediaUrl = await subirVideoDesdeTelegram(videoObj.file_id);
+      }
+
         // A) Manejo de Videos/Documentos enviados al chat
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
 

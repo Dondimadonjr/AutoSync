@@ -15,8 +15,19 @@ const supabase = createClient(env.SUPABASE_URL, supabaseKey);
  */
 async function subirVideoDesdeTelegram(fileId, botToken) {
   try {
+    const botToken = env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+
+    if (!botToken) {
+      throw new Error('TELEGRAM_BOT_TOKEN no está definido en las variables de entorno.');
+    }
+
     // 1. Obtener la ruta del archivo en los servidores de Telegram
     const fileRes = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+    
+    if (!fileRes.data.ok) {
+      throw new Error(`Telegram API Error: ${fileRes.data.description}`);
+    }
+
     const filePath = fileRes.data.result.file_path;
     const fileUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
 
