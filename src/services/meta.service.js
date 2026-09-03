@@ -60,46 +60,43 @@ async function esperarContenedorListo(containerId, accessToken, maxAttempts = 12
  * @returns {Promise<{ postId: string, containerId: string }>}
  */
 async function publicarEnInstagram(instagramAccountId, accessToken, videoUrl, caption) {
-  try {
-    logger.info('Iniciando creación de contenedor en Meta Graph API', { instagramAccountId });
+  let containerId = null;
+  let attempts = 0;
+  const maxAttempts = 3;
 
-    // 1. Crear el contenedor multimedia para REELS
-    const containerRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media`, {
-      media_type: 'REELS',
-      video_url: videoUrl,
-      caption,
-      access_token: accessToken,
-    });
+  // Intentar crear el contenedor con reintentos si Meta falla la descarga
+  while (!containerId && attempts < maxAttempts) {
+    attempts++;
+    try {
+      logger.info(`Intento ${attempts} de creación de contenedor en Meta...`);
+      
+      const containerRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media`, {
+        media_type: 'REELS',
+        video_url: videoUrl,
+        caption,
+        access_token: accessToken,
+      });
 
-    const containerId = containerRes.data.id;
-    logger.info('Contenedor creado exitosamente en Meta', { containerId });
-
-    // 2. Esperar activamente a que Meta finalice el procesamiento del video
-    await esperarContenedorListo(containerId, accessToken);
-
-    // 3. Publicar el contenedor listo
-    const publishRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media_publish`, {
-      creation_id: containerId,
-      access_token: accessToken,
-    });
-
-    const postId = publishRes.data.id;
-    logger.info('Reel publicado exitosamente en Instagram', { postId, containerId });
-
-    return { postId, containerId };
-  } catch (error) {
-    const errorData = error.response?.data?.error;
-    const errorMessage = errorData
-      ? `Meta API Error (${errorData.code}): ${errorData.message} - ${errorData.error_user_msg || ''}`
-      : error.message;
-
-    logger.error('Fallo en la publicación con Meta Graph API', {
-      error: errorMessage,
-      details: error.response?.data,
-    });
-
-    throw new Error(errorMessage);
+      containerId = containerRes.data.id;
+    } catch (error) {
+      if (attempts >= maxAttempts) throw error;
+      logger.warn(`Fallo al crear contenedor (Intento ${attempts}). Reintentando en 3s...`);
+      await new Promise((res) => setTimeout(res, 3000));
+    }
   }
+
+  logger.info('Contenedor creado exitosamente en Meta', { containerId });
+
+  // Esperar a que el procesamiento transcodifique el video
+  await esperarContenedorListo(containerId, accessToken);
+
+  // Publicar Reel
+  const publishRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media_publish`, {
+    creation_id: containerId,
+    access_token: accessToken,
+  });
+
+  return { postId: publishRes.data.id, containerId };
 }
 
 module.exports = {
