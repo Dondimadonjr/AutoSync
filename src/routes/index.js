@@ -8,7 +8,7 @@ const router = Router();
 router.get('/', (req, res) => {
   res.json({
     status: 'online',
-    service: 'SocialSync AI Engine 🚀',
+    service: 'AutoSync 🚀',
     timestamp: new Date().toISOString(),
     version: '2.0.0-enterprise',
   });

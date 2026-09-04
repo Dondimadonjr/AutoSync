@@ -1,5 +1,5 @@
 /**
- * Constantes de la aplicación SocialSync
+ * Constantes de la aplicación AutoSync
  */
 const POST_STATUS = Object.freeze({
   BORRADOR: 'borrador',

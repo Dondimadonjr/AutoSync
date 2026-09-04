@@ -1,5 +1,5 @@
 -- =========================================================================
--- MIGRACIÓN DE BASE DE DATOS SUPABASE: SocialSync Enterprise Schema
+-- MIGRACIÓN DE BASE DE DATOS SUPABASE: AuroSync Enterprise Schema
 -- =========================================================================
 
 -- 1. TIPOS ENUM PERSONALIZADOS

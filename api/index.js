@@ -29,7 +29,7 @@ app.use(errorHandler);
 if (require.main === module && !process.env.VERCEL) {
   const PORT = env.PORT || 3000;
   app.listen(PORT, () => {
-    logger.info(`🚀 Servidor SocialSync corriendo localmente en el puerto ${PORT}`);
+    logger.info(`🚀 Servidor AutoSync corriendo localmente en el puerto ${PORT}`);
   });
 }
 
