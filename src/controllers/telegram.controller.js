@@ -24,54 +24,53 @@ async function handleWebhook(req, res) {
         const chatId = chat.id;
 
         // 1. Manejo de texto enviado para PROGRAMAR / REPROGRAMAR fecha
-        // 1. Manejo de texto enviado para PROGRAMAR / REPROGRAMAR fecha
-if (text && estadosProgramacion.has(chatId)) {
-  const publicacionId = estadosProgramacion.get(chatId);
-  estadosProgramacion.delete(chatId);
+        if (text && estadosProgramacion.has(chatId)) {
+          const publicacionId = estadosProgramacion.get(chatId);
+          estadosProgramacion.delete(chatId);
 
-  // Formatear el texto de entrada para asegurar interpretación en hora local
-  const textoLimpio = text.trim().replace(' ', 'T');
-  // Asumimos zona horaria local (ej: -03:00 / -04:00) o dejamos que ISO cree la fecha exacta
-  const fechaProgramada = new Date(textoLimpio);
+          // Formatear el texto de entrada para asegurar interpretación en hora local
+          const textoLimpio = text.trim().replace(' ', 'T');
+          // Asumimos zona horaria local (ej: -03:00 / -04:00) o dejamos que ISO cree la fecha exacta
+          const fechaProgramada = new Date(textoLimpio);
 
-  if (isNaN(fechaProgramada.getTime())) {
-    await sendMessage(
-      chatId,
-      '❌ *Formato de fecha inválido.* Por favor escribe la fecha con el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-03 22:12`).'
-    );
-    return;
-  }
+          if (isNaN(fechaProgramada.getTime())) {
+            await sendMessage(
+              chatId,
+              '❌ *Formato de fecha inválido.* Por favor escribe la fecha con el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-03 22:12`).'
+            );
+            return;
+          }
 
-  // Convertir a string ISO para almacenar de manera unificada
-  const isoFecha = fechaProgramada.toISOString();
+          // Convertir a string ISO para almacenar de manera unificada
+          const isoFecha = fechaProgramada.toISOString();
 
-  // Actualizar en Supabase
-  const { data: pubActualizada, error: updateError } = await supabase
-    .from('publicaciones')
-    .update({
-      programado_para: isoFecha,
-      estado: POST_STATUS.PROGRAMADO || 'PROGRAMADO',
-    })
-    .eq('id', publicacionId)
-    .select('*')
-    .single();
+          // Actualizar en Supabase
+          const { data: pubActualizada, error: updateError } = await supabase
+            .from('publicaciones')
+            .update({
+              programado_para: isoFecha,
+              estado: POST_STATUS.PROGRAMADO || 'PROGRAMADO',
+            })
+            .eq('id', publicacionId)
+            .select('*')
+            .single();
 
-  if (updateError) throw updateError;
+          if (updateError) throw updateError;
 
-  await sendMessage(
-    chatId,
-    `📅 *Publicación programada exitosamente para:* *${fechaProgramada.toLocaleString('es-ES')}*\n\n` +
-    `Si deseas cambiar la fecha o editar el texto antes de publicarse, usa los botones a continuación:`
-  );
+          await sendMessage(
+            chatId,
+            `📅 *Publicación programada exitosamente para:* *${fechaProgramada.toLocaleString('es-ES')}*\n\n` +
+            `Si deseas cambiar la fecha o editar el texto antes de publicarse, usa los botones a continuación:`
+          );
 
-  await enviarPropuestaInteractivamente(
-    chatId,
-    pubActualizada.id,
-    pubActualizada.caption,
-    pubActualizada.media_url
-  );
-  return;
-}
+          await enviarPropuestaInteractivamente(
+            chatId,
+            pubActualizada.id,
+            pubActualizada.caption,
+            pubActualizada.media_url
+          );
+          return;
+        }
 
         // 2. Manejo de texto enviado para EDITAR el caption
         if (text && estadosEdicion.has(chatId)) {
