@@ -6,10 +6,18 @@
       "memory": 1024
     }
   },
+  
   "rewrites": [
     {
       "source": "/(.*)",
       "destination": "/api/index.js"
+    }
+  ],
+
+  "crons": [
+    {
+      "path": "/api/cron",
+      "schedule": "*/10 * * * *"
     }
   ]
 }
