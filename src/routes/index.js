@@ -23,7 +23,7 @@ router.get('/health', (req, res) => {
 });
 
 // Registrar módulos de rutas
-router.use('/', postRoutes);
-router.use('/', telegramRoutes);
+router.use('/api', postRoutes);
+router.use('/api', telegramRoutes);
 
 module.exports = router;
