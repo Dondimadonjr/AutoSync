@@ -6,7 +6,7 @@
       "memory": 1024
     }
   },
-  
+
   "rewrites": [
     {
       "source": "/(.*)",
@@ -17,7 +17,7 @@
   "crons": [
     {
       "path": "/api/cron",
-      "schedule": "*/10 * * * *"
+      "schedule": "*/5 * * * *"
     }
   ]
 }
