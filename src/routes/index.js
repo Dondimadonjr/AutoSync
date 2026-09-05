@@ -1,7 +1,7 @@
 const { Router } = require('express');
 const postRoutes = require('./post.routes');
 const telegramRoutes = require('./telegram.routes');
-const cronHandler = require('./api/cron');
+const cronHandler = require('../../api/cron');
 
 const router = Router();
 
