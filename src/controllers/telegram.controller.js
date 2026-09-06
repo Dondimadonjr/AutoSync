@@ -7,6 +7,17 @@ const { generarPropuestaPublicacion } = require('../services/ai.service');
 const supabase = require('../config/supabase');
 const { POST_STATUS } = require('../constants');
 
+/**
+ * Formatea el objeto devuelto por la IA o string a formato texto con hashtags
+ */
+function formatearCaptionIA(propuesta) {
+  if (typeof propuesta === 'object' && propuesta !== null) {
+    const hashtags = Array.isArray(propuesta.hashtags) ? propuesta.hashtags.join(' ') : '';
+    return `${propuesta.caption}\n\n${hashtags}`.trim();
+  }
+  return String(propuesta || '').trim();
+}
+
 async function handleWebhook(req, res) {
   res.status(200).json({ ok: true });
 
@@ -19,9 +30,10 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        // 1. Verificar si hay publicaciones esperando FECHA o TEXTO en Supabase para este cliente
+        // 1. Manejo de entradas de texto libre (esperando FECHA o NUEVO TEXTO PARA EDITAR)
         if (text && !text.startsWith('/')) {
-          // Buscar si existe una publicación en estado PENDIENTE_FECHA
+          
+          // A. Si la publicación está esperando FECHA DE PROGRAMACIÓN
           const { data: pubPendienteFecha } = await supabase
             .from('publicaciones')
             .select('*')
@@ -36,7 +48,7 @@ async function handleWebhook(req, res) {
 
             let fechaProgramada;
             if (fechaPart && horaPart) {
-              // Aplicar el desfase GMT-4 (Chile)
+              // Offset explícito de Chile (GMT-4)
               const isoLocalConOffset = `${fechaPart}T${horaPart}:00-04:00`;
               fechaProgramada = new Date(isoLocalConOffset);
             } else {
@@ -80,7 +92,7 @@ async function handleWebhook(req, res) {
             return;
           }
 
-          // Buscar si existe una publicación en estado PENDIENTE_EDITAR
+          // B. Si la publicación está esperando EDICIÓN -> Pasa nuevamente por la IA
           const { data: pubPendienteEditar } = await supabase
             .from('publicaciones')
             .select('*')
@@ -90,26 +102,37 @@ async function handleWebhook(req, res) {
             .maybeSingle();
 
           if (pubPendienteEditar) {
-            const { data: pubActualizada, error: updateError } = await supabase
-              .from('publicaciones')
-              .update({ 
-                caption: text,
-                estado: POST_STATUS.PENDIENTE_APROBACION || 'borrador'
-              })
-              .eq('id', pubPendienteEditar.id)
-              .select('*')
-              .single();
+            await sendMessage(chatId, '🤖 *Regenerando propuesta con la IA según tus nuevas indicaciones...*');
 
-            if (updateError) throw updateError;
+            try {
+              const tipoContenido = 'Publicación para Instagram';
+              const propuestaAI = await generarPropuestaPublicacion(tipoContenido, text, 'Instagram');
+              const nuevoCaption = formatearCaptionIA(propuestaAI);
 
-            await sendMessage(chatId, '✅ *Caption actualizado con éxito.* Revisa la nueva versión:');
+              const { data: pubActualizada, error: updateError } = await supabase
+                .from('publicaciones')
+                .update({ 
+                  caption: nuevoCaption,
+                  estado: POST_STATUS.PENDIENTE_APROBACION || 'borrador'
+                })
+                .eq('id', pubPendienteEditar.id)
+                .select('*')
+                .single();
 
-            await enviarPropuestaInteractivamente(
-              chatId,
-              pubActualizada.id,
-              pubActualizada.caption,
-              pubActualizada.media_url
-            );
+              if (updateError) throw updateError;
+
+              await sendMessage(chatId, '✅ *Caption regenerado por la IA con éxito.* Revisa la nueva versión:');
+
+              await enviarPropuestaInteractivamente(
+                chatId,
+                pubActualizada.id,
+                pubActualizada.caption,
+                pubActualizada.media_url
+              );
+            } catch (editError) {
+              logger.error('Error regenerando propuesta con IA:', { error: editError.message });
+              await sendMessage(chatId, `❌ Error al regenerar con la IA: *${editError.message}*`);
+            }
             return;
           }
         }
@@ -129,9 +152,7 @@ async function handleWebhook(req, res) {
             const descripcion = caption || 'Publicación visual atractiva para redes sociales';
 
             const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
-            const captionTexto = typeof propuesta === 'object'
-              ? `${propuesta.caption}\n\n${Array.isArray(propuesta.hashtags) ? propuesta.hashtags.join(' ') : ''}`
-              : propuesta;
+            const captionTexto = formatearCaptionIA(propuesta);
 
             let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
             const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
@@ -186,7 +207,6 @@ async function handleWebhook(req, res) {
         if (accion === 'aprobar') {
           await procesarAprobacionAsync(publicacionId, chatId);
         } else if (accion === 'agendar') {
-          // Cambiar estado en Supabase a PENDIENTE_FECHA
           await supabase
             .from('publicaciones')
             .update({ estado: 'PENDIENTE_FECHA' })
@@ -197,7 +217,6 @@ async function handleWebhook(req, res) {
             `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 21:15\``
           );
         } else if (accion === 'editar') {
-          // Cambiar estado en Supabase a PENDIENTE_EDITAR
           await supabase
             .from('publicaciones')
             .update({ estado: 'PENDIENTE_EDITAR' })
@@ -205,7 +224,7 @@ async function handleWebhook(req, res) {
 
           await sendMessage(
             chatId,
-            `✏️ *Modo edición activado.*\n\nEscribe y envía el nuevo texto/caption que deseas colocar en esta publicación:`
+            `✏️ *Modo edición con IA activado.*\n\nEscribe los nuevos detalles o instrucciones (ejemplo: *"plato de agua, 130 diametro x 50 alto, ideal para exteriores"*) para regenerar el post:`
           );
         } else if (accion === 'rechazar') {
           await procesarRechazo(publicacionId, chatId);
