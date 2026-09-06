@@ -165,6 +165,7 @@ async function handleWebhook(req, res) {
                 caption: captionTexto,
                 media_url: mediaUrl,
                 plataformas: ['instagram'],
+                tipo_publicacion: 'FEED',
                 estado: 'borrador',
               })
               .select('id')
@@ -202,32 +203,53 @@ async function handleWebhook(req, res) {
 
         const parts = data.split('_');
         const accion = parts[0];
-        const publicacionId = parts.slice(1).join('_');
 
-        if (accion === 'aprobar') {
-          await procesarAprobacionAsync(publicacionId, chatId);
-        } else if (accion === 'agendar') {
-          await supabase
+        if (accion === 'tipo') {
+          const tipoSeleccionado = parts[1]; // 'FEED' o 'STORY'
+          const realPublicacionId = parts.slice(2).join('_');
+
+          const { error: updateTypeError } = await supabase
             .from('publicaciones')
-            .update({ estado: 'PENDIENTE_FECHA' })
-            .eq('id', publicacionId);
+            .update({ tipo_publicacion: tipoSeleccionado })
+            .eq('id', realPublicacionId);
 
-          await sendMessage(
-            chatId,
-            `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 21:15\``
-          );
-        } else if (accion === 'editar') {
-          await supabase
-            .from('publicaciones')
-            .update({ estado: 'PENDIENTE_EDITAR' })
-            .eq('id', publicacionId);
+          if (updateTypeError) {
+            logger.error('Error al actualizar tipo_publicacion:', updateTypeError);
+            await sendMessage(chatId, '❌ No se pudo cambiar el formato de publicación.');
+            return;
+          }
 
-          await sendMessage(
-            chatId,
-            `✏️ *Modo edición con IA activado.*\n\nEscribe los nuevos detalles o instrucciones (ejemplo: *"plato de agua, 130 diametro x 50 alto, ideal para exteriores"*) para regenerar el post:`
-          );
-        } else if (accion === 'rechazar') {
-          await procesarRechazo(publicacionId, chatId);
+          const mensajeTipo = tipoSeleccionado === 'STORY' ? '📱 Historia / Story' : '📸 Post Normal (Feed)';
+          await sendMessage(chatId, `✅ Formato actualizado a: *${mensajeTipo}*`);
+
+        } else {
+          const publicacionId = parts.slice(1).join('_');
+
+          if (accion === 'aprobar') {
+            await procesarAprobacionAsync(publicacionId, chatId);
+          } else if (accion === 'agendar') {
+            await supabase
+              .from('publicaciones')
+              .update({ estado: 'PENDIENTE_FECHA' })
+              .eq('id', publicacionId);
+
+            await sendMessage(
+              chatId,
+              `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 21:15\``
+            );
+          } else if (accion === 'editar') {
+            await supabase
+              .from('publicaciones')
+              .update({ estado: 'PENDIENTE_EDITAR' })
+              .eq('id', publicacionId);
+
+            await sendMessage(
+              chatId,
+              `✏️ *Modo edición con IA activado.*\n\nEscribe los nuevos detalles o instrucciones (ejemplo: *"plato de agua, 130 diametro x 50 alto, ideal para exteriores"*) para regenerar el post:`
+            );
+          } else if (accion === 'rechazar') {
+            await procesarRechazo(publicacionId, chatId);
+          }
         }
       }
     } catch (error) {

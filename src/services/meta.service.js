@@ -1,142 +1,88 @@
 const axios = require('axios');
-const logger = require('../config/logger');
-const { META_GRAPH_BASE_URL } = require('../constants');
 
 /**
- * Consulta el estado de procesamiento del contenedor en Meta Graph API
+ * Publica una Historia (Story) en Instagram
  */
-async function esperarContenedorListo(containerId, accessToken, maxAttempts = 20, intervalMs = 2000) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    try {
-      const response = await axios.get(`${META_GRAPH_BASE_URL}/${containerId}`, {
-        params: {
-          fields: 'status_code,status',
-          access_token: accessToken,
-        },
-      });
-
-      const { status_code, status } = response.data;
-      logger.info('Estado del contenedor en Meta', {
-        containerId,
-        attempt,
-        status_code,
-        status,
-      });
-
-      if (status_code === 'FINISHED') {
-        return true;
-      }
-
-      if (status_code === 'ERROR' || status_code === 'EXPIRED') {
-        throw new Error(`El contenedor falló en Meta con estado: ${status_code} (${status || 'Sin detalle'})`);
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    } catch (err) {
-      if (err.message.includes('El contenedor falló')) {
-        throw err;
-      }
-      logger.warn(`Error sondeando estado del contenedor [${containerId}] intento ${attempt}`, {
-        error: err.response?.data || err.message,
-      });
-      await new Promise((resolve) => setTimeout(resolve, intervalMs));
-    }
-  }
-
-  throw new Error(`Tiempo de espera agotado esperando que Meta procese el archivo.`);
-}
-
-/**
- * Detecta si la URL o ruta pertenece a una imagen basándose en la extensión
- */
-function esImagen(url) {
-  if (!url) return false;
-  const urlLimpia = url.split('?')[0].toLowerCase();
-  const extensionesVideo = ['.mp4', '.mov', '.avi', '.m4v', '.mkv'];
+async function publicarStoryInstagram(igAccountId, accessToken, mediaUrl, isVideo = false) {
+  const mediaType = isVideo ? 'VIDEO' : 'IMAGE';
   
-  if (extensionesVideo.some((ext) => urlLimpia.endsWith(ext))) {
-    return false;
+  // 1. Crear contenedor de Story
+  const containerUrl = `https://graph.facebook.com/v19.0/${igAccountId}/media`;
+  const containerParams = {
+    access_token: accessToken,
+    media_type: 'STORIES',
+    [isVideo ? 'video_url' : 'image_url']: mediaUrl,
+  };
+
+  const containerRes = await axios.post(containerUrl, null, { params: containerParams });
+  const creationId = containerRes.data.id;
+
+  // Si es video, esperar brevemente a que Meta termine de procesarlo
+  if (isVideo) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
   }
 
-  return true;
+  // 2. Publicar la Historia
+  const publishUrl = `https://graph.facebook.com/v19.0/${igAccountId}/media_publish`;
+  const publishRes = await axios.post(publishUrl, null, {
+    params: { creation_id: creationId, access_token: accessToken },
+  });
+
+  return { postId: publishRes.data.id };
 }
 
 /**
- * Publica una foto o Reel en una cuenta de Instagram Business de forma dinámica
+ * Publica un Carrusel (múltiples fotos/videos) en Instagram
  */
-async function publicarEnInstagram(instagramAccountId, accessToken, mediaUrl, caption) {
-  let containerId = null;
-  let attempts = 0;
-  const maxAttempts = 3;
-  const esFoto = esImagen(mediaUrl);
+async function publicarCarruselInstagram(igAccountId, accessToken, mediaUrls, caption) {
+  // 1. Crear contenedores individuales para cada elemento del carrusel
+  const itemContainerIds = [];
 
-  // 1. Crear el contenedor
-  while (!containerId && attempts < maxAttempts) {
-    attempts++;
-    try {
-      logger.info(`Intento ${attempts} de creación de contenedor en Meta (${esFoto ? 'IMAGE' : 'REELS'})...`);
+  for (const media of mediaUrls) {
+    const isVideo = typeof media === 'object' ? media.isVideo : media.endsWith('.mp4');
+    const url = typeof media === 'object' ? media.url : media;
 
-      const payload = esFoto
-        ? {
-            image_url: mediaUrl,
-            caption,
-            access_token: accessToken,
-          }
-        : {
-            media_type: 'REELS',
-            video_url: mediaUrl,
-            caption,
-            access_token: accessToken,
-          };
+    const containerParams = {
+      access_token: accessToken,
+      is_carousel_item: true,
+      [isVideo ? 'video_url' : 'image_url']: url,
+    };
 
-      const containerRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media`, payload);
-      containerId = containerRes.data.id;
-    } catch (error) {
-      if (attempts >= maxAttempts) throw error;
-      logger.warn(`Fallo al crear contenedor (Intento ${attempts}). Reintentando en 3s...`, {
-        error: error.response?.data || error.message,
-      });
-      await new Promise((res) => setTimeout(res, 3000));
-    }
+    const itemRes = await axios.post(
+      `https://graph.facebook.com/v19.0/${igAccountId}/media`,
+      null,
+      { params: containerParams }
+    );
+    itemContainerIds.push(itemRes.data.id);
   }
 
-  logger.info('Contenedor creado exitosamente en Meta', { containerId, esFoto });
+  // 2. Crear el contenedor principal del Carrusel
+  const carouselParams = {
+    access_token: accessToken,
+    media_type: 'CAROUSEL',
+    children: itemContainerIds.join(','),
+    caption: caption,
+  };
 
-  // 2. Esperar que el contenedor esté listo
-  if (!esFoto) {
-    await esperarContenedorListo(containerId, accessToken);
-  } else {
-    // Breve pausa para asegurar la disponibilidad del contenedor de la imagen en los CDN de Meta
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-  }
+  const carouselRes = await axios.post(
+    `https://graph.facebook.com/v19.0/${igAccountId}/media`,
+    null,
+    { params: carouselParams }
+  );
+  const carouselContainerId = carouselRes.data.id;
 
-  // 3. Publicar el contenedor con reintentos si Meta aún reporta "Media ID is not available"
-  let postId = null;
-  let publishAttempts = 0;
+  // 3. Publicar el Carrusel
+  const publishRes = await axios.post(
+    `https://graph.facebook.com/v19.0/${igAccountId}/media_publish`,
+    null,
+    { params: { creation_id: carouselContainerId, access_token: accessToken } }
+  );
 
-  while (!postId && publishAttempts < 3) {
-    publishAttempts++;
-    try {
-      const publishRes = await axios.post(`${META_GRAPH_BASE_URL}/${instagramAccountId}/media_publish`, {
-        creation_id: containerId,
-        access_token: accessToken,
-      });
-      postId = publishRes.data.id;
-    } catch (pubError) {
-      const subcode = pubError.response?.data?.error?.error_subcode;
-      if (subcode === 2207027 && publishAttempts < 3) {
-        logger.warn(`El contenido aún no está listo (2207027). Reintentando publicación en 3s (Intento ${publishAttempts})...`);
-        await new Promise((res) => setTimeout(res, 3000));
-      } else {
-        throw pubError;
-      }
-    }
-  }
-
-  return { postId, containerId };
+  return { postId: publishRes.data.id };
 }
 
 module.exports = {
-  publicarEnInstagram,
-  esperarContenedorListo,
+  // ... tus funciones existentes
+  publicarStoryInstagram,
+  publicarCarruselInstagram,
 };
