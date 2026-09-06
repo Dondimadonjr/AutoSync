@@ -48,51 +48,42 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
   }
 
   try {
-    // 1. Obtener la publicación actual de Supabase
-    const { data: publicacion, error: fetchErr } = await supabase
-      .from('publicaciones')
-      .select('*, clientes(*)')
-      .eq('id', publicacionId)
-      .single();
+    // 1. Obtener credenciales de Instagram para el cliente
+    const { data: credsList, error: credsErr } = await supabase
+      .from('credenciales_redes')
+      .select('*')
+      .eq('cliente_id', publicacion.cliente_id)
+      .eq('plataforma', 'instagram')
+      .limit(1);
 
-    if (fetchErr || !publicacion) {
-      logger.warn('Publicación no encontrada en Supabase', { publicacionId });
-      await sendMessage(chatId, '❌ No se encontró la publicación.');
-      return;
+    const creds = credsList && credsList.length > 0 ? credsList[0] : null;
+
+    // Extraer ID y Token con fallbacks (soporta cuenta_id o instagram_account_id)
+    const instagramAccountId = creds?.cuenta_id || creds?.instagram_account_id || process.env.INSTAGRAM_ACCOUNT_ID;
+    const accessToken = creds?.token_acceso || creds?.access_token || process.env.META_ACCESS_TOKEN;
+
+    if (!instagramAccountId || instagramAccountId === 'undefined') {
+      throw new Error('ID de cuenta de Instagram no encontrado en credenciales_redes ni en variables de entorno.');
     }
 
-    if (publicacion.estado === POST_STATUS.PUBLICADO) {
-      await sendMessage(chatId, '⚠️ Esta publicación ya fue publicada anteriormente.');
-      return;
+    // 2. Publicar según el formato elegido
+    let resultado;
+    if (publicacion.tipo_publicacion === 'STORY') {
+      const esVideo = publicacion.media_url.includes('.mp4');
+      resultado = await publicarStoryInstagram(
+        instagramAccountId,
+        accessToken,
+        publicacion.media_url,
+        esVideo
+      );
+    } else {
+      resultado = await publicarEnInstagram(
+        instagramAccountId,
+        accessToken,
+        publicacion.media_url,
+        publicacion.caption
+      );
     }
-
-    // 2. Obtener credenciales de Instagram para el cliente
-        const { data: credsList, error: credsErr } = await supabase
-          .from('credenciales_redes')
-          .select('*')
-          .eq('cliente_id', publicacion.cliente_id)
-          .eq('plataforma', 'instagram')
-          .limit(1);
-
-        const creds = credsList && credsList.length > 0 ? credsList[0] : null;
-
-        if (credsErr || !creds) {
-          logger.error('Detalle error credenciales Supabase:', { 
-            credsErr, 
-            clienteIdBuscado: publicacion.cliente_id 
-          });
-
-          const errorMsg = '⚠️ Publicación aprobada, pero el cliente no tiene tokens de Instagram vinculados.';
-
-          await supabase
-            .from('publicaciones')
-            .update({ estado: POST_STATUS.APROBADO })
-            .eq('id', publicacionId);
-
-          await registrarLog(publicacionId, 'FALLO_CREDENCIALES', 'WARN', { error: errorMsg, credsErr });
-          await sendMessage(chatId, errorMsg);
-          return;
-        }
 
     // 3. Ejecutar publicación en Instagram
     const { postId } = await publicarEnInstagram(
