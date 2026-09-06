@@ -7,10 +7,6 @@ const { generarPropuestaPublicacion } = require('../services/ai.service');
 const supabase = require('../config/supabase');
 const { POST_STATUS } = require('../constants');
 
-// Mapas en memoria para rastrear los estados por usuario (chatId)
-const estadosEdicion = new Map();
-const estadosProgramacion = new Map();
-
 async function handleWebhook(req, res) {
   res.status(200).json({ ok: true });
 
@@ -23,90 +19,102 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        // 1. Manejo de texto enviado para PROGRAMAR / REPROGRAMAR fecha
-        if (text && estadosProgramacion.has(chatId)) {
-          const publicacionId = estadosProgramacion.get(chatId);
-          estadosProgramacion.delete(chatId);
+        // 1. Verificar si hay publicaciones esperando FECHA o TEXTO en Supabase para este cliente
+        if (text && !text.startsWith('/')) {
+          // Buscar si existe una publicación en estado PENDIENTE_FECHA
+          const { data: pubPendienteFecha } = await supabase
+            .from('publicaciones')
+            .select('*')
+            .eq('estado', 'PENDIENTE_FECHA')
+            .order('creado_en', { ascending: false })
+            .limit(1)
+            .maybeSingle();
 
-          const textoLimpio = text.trim();
-          const [fechaPart, horaPart] = textoLimpio.split(' ');
+          if (pubPendienteFecha) {
+            const textoLimpio = text.trim();
+            const [fechaPart, horaPart] = textoLimpio.split(' ');
 
-          let fechaProgramada;
-          if (fechaPart && horaPart) {
-            // Aplicar el desfase de Chile (GMT-4) de forma explícita
-            const isoLocalConOffset = `${fechaPart}T${horaPart}:00-04:00`;
-            fechaProgramada = new Date(isoLocalConOffset);
-          } else {
-            fechaProgramada = new Date(textoLimpio);
-          }
+            let fechaProgramada;
+            if (fechaPart && horaPart) {
+              // Aplicar el desfase GMT-4 (Chile)
+              const isoLocalConOffset = `${fechaPart}T${horaPart}:00-04:00`;
+              fechaProgramada = new Date(isoLocalConOffset);
+            } else {
+              fechaProgramada = new Date(textoLimpio);
+            }
 
-          if (isNaN(fechaProgramada.getTime())) {
+            if (isNaN(fechaProgramada.getTime())) {
+              await sendMessage(
+                chatId,
+                '❌ *Formato de fecha inválido.* Por favor escribe la fecha usando el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-05 21:00`).'
+              );
+              return;
+            }
+
+            const isoFechaUTC = fechaProgramada.toISOString();
+
+            const { data: pubActualizada, error: updateError } = await supabase
+              .from('publicaciones')
+              .update({
+                programado_para: isoFechaUTC,
+                estado: POST_STATUS.PROGRAMADO || 'PROGRAMADO',
+              })
+              .eq('id', pubPendienteFecha.id)
+              .select('*')
+              .single();
+
+            if (updateError) throw updateError;
+
             await sendMessage(
               chatId,
-              '❌ *Formato de fecha inválido.* Escribe la fecha con el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-05 21:00`).'
+              `📅 *Publicación programada exitosamente para:* *${fechaPart} a las ${horaPart}*\n\n` +
+              `Si deseas cambiar la fecha o editar el texto antes de publicarse, usa los botones a continuación:`
+            );
+
+            await enviarPropuestaInteractivamente(
+              chatId,
+              pubActualizada.id,
+              pubActualizada.caption,
+              pubActualizada.media_url
             );
             return;
           }
 
-          const isoFechaUTC = fechaProgramada.toISOString();
-
-          // Actualizar en Supabase
-          const { data: pubActualizada, error: updateError } = await supabase
+          // Buscar si existe una publicación en estado PENDIENTE_EDITAR
+          const { data: pubPendienteEditar } = await supabase
             .from('publicaciones')
-            .update({
-              programado_para: isoFechaUTC,
-              estado: POST_STATUS.PROGRAMADO || 'PROGRAMADO',
-            })
-            .eq('id', publicacionId)
             .select('*')
-            .single();
+            .eq('estado', 'PENDIENTE_EDITAR')
+            .order('creado_en', { ascending: false })
+            .limit(1)
+            .maybeSingle();
 
-          if (updateError) {
-            logger.error('Error actualizando fecha en Supabase:', updateError);
-            throw updateError;
+          if (pubPendienteEditar) {
+            const { data: pubActualizada, error: updateError } = await supabase
+              .from('publicaciones')
+              .update({ 
+                caption: text,
+                estado: POST_STATUS.PENDIENTE_APROBACION || 'borrador'
+              })
+              .eq('id', pubPendienteEditar.id)
+              .select('*')
+              .single();
+
+            if (updateError) throw updateError;
+
+            await sendMessage(chatId, '✅ *Caption actualizado con éxito.* Revisa la nueva versión:');
+
+            await enviarPropuestaInteractivamente(
+              chatId,
+              pubActualizada.id,
+              pubActualizada.caption,
+              pubActualizada.media_url
+            );
+            return;
           }
-
-          await sendMessage(
-            chatId,
-            `📅 *Publicación programada exitosamente para:* *${fechaPart} a las ${horaPart}*\n\n` +
-            `Si deseas cambiar la fecha o editar el texto antes de publicarse, usa los botones a continuación:`
-          );
-
-          await enviarPropuestaInteractivamente(
-            chatId,
-            pubActualizada.id,
-            pubActualizada.caption,
-            pubActualizada.media_url
-          );
-          return;
         }
 
-        // 2. Manejo de texto enviado para EDITAR el caption
-        if (text && estadosEdicion.has(chatId)) {
-          const publicacionId = estadosEdicion.get(chatId);
-          estadosEdicion.delete(chatId);
-
-          const { data: pubActualizada, error: updateError } = await supabase
-            .from('publicaciones')
-            .update({ caption: text })
-            .eq('id', publicacionId)
-            .select('*')
-            .single();
-
-          if (updateError) throw updateError;
-
-          await sendMessage(chatId, '✅ *Caption actualizado con éxito.* Revisa la nueva versión:');
-
-          await enviarPropuestaInteractivamente(
-            chatId,
-            pubActualizada.id,
-            pubActualizada.caption,
-            pubActualizada.media_url
-          );
-          return;
-        }
-
-        // 3. Manejo de subida de Multimedia (Videos / Fotos / Documentos)
+        // 2. Manejo de subida de Multimedia (Videos / Fotos)
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
         const fotoArchivo = photo ? photo[photo.length - 1] : null;
         const archivoMultimedia = videoArchivo || fotoArchivo;
@@ -136,7 +144,7 @@ async function handleWebhook(req, res) {
                 caption: captionTexto,
                 media_url: mediaUrl,
                 plataformas: ['instagram'],
-                estado: POST_STATUS.PENDIENTE_APROBACION,
+                estado: 'borrador',
               })
               .select('id')
               .single();
@@ -152,7 +160,7 @@ async function handleWebhook(req, res) {
           return;
         }
 
-        // 4. Manejo del comando /start
+        // 3. Comando /start
         if (text && text.startsWith('/start')) {
           await sendMessage(
             chatId,
@@ -164,7 +172,7 @@ async function handleWebhook(req, res) {
         }
       }
 
-      // 5. Manejo de Botones Interactivos (Callback Query)
+      // 4. Manejo de Botones Interactivos (Callback Query)
       if (update.callback_query) {
         const { id: callbackQueryId, message, data } = update.callback_query;
         const chatId = message.chat.id;
@@ -178,17 +186,23 @@ async function handleWebhook(req, res) {
         if (accion === 'aprobar') {
           await procesarAprobacionAsync(publicacionId, chatId);
         } else if (accion === 'agendar') {
-          // Activar flujo de programación / reprogramación
-          estadosProgramacion.set(chatId, publicacionId);
-          estadosEdicion.delete(chatId);
+          // Cambiar estado en Supabase a PENDIENTE_FECHA
+          await supabase
+            .from('publicaciones')
+            .update({ estado: 'PENDIENTE_FECHA' })
+            .eq('id', publicacionId);
+
           await sendMessage(
             chatId,
-            `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 20:50\``
+            `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 21:15\``
           );
         } else if (accion === 'editar') {
-          // Activar flujo de edición de caption
-          estadosEdicion.set(chatId, publicacionId);
-          estadosProgramacion.delete(chatId);
+          // Cambiar estado en Supabase a PENDIENTE_EDITAR
+          await supabase
+            .from('publicaciones')
+            .update({ estado: 'PENDIENTE_EDITAR' })
+            .eq('id', publicacionId);
+
           await sendMessage(
             chatId,
             `✏️ *Modo edición activado.*\n\nEscribe y envía el nuevo texto/caption que deseas colocar en esta publicación:`
