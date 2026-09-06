@@ -96,7 +96,6 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       .from('publicaciones')
       .update({
         estado: POST_STATUS.PUBLICADO || 'PUBLICADO',
-        meta_post_id: postId,
         publicado_en: new Date().toISOString(),
       })
       .eq('id', publicacionId);
