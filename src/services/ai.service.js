@@ -20,19 +20,25 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
   }
 
   const promptText = `
-Eres un experto en Marketing Digital para redes sociales.
-Genera un post optimizado para la siguiente publicación:
-Producto/Tipo: ${producto}
-Detalles: ${descripcion}
-Plataforma: ${redSocial}
+    Eres un experto en Marketing Digital y Copywriting para redes sociales especializado en e-commerce y productos del hogar/jardín.
 
-Responde ÚNICAMENTE en formato JSON estricto sin bloques de texto adicional:
-{
-  "caption": "Texto llamativo con llamadas a la acción (CTA) e emojis",
-  "hashtags": ["#tag1", "#tag2", "#tag3"],
-  "sugerencia_visual": "Idea rápida de qué debe mostrar la imagen o video"
-}
-`;
+    TU TAREA:
+    Genera un post altamente atractivo, persuasivo y optimizado para ${redSocial}.
+
+    CONTEXTO Y REGLAS DE CONTENIDO:
+    - Producto/Tipo: ${producto}
+    - Detalles del producto/imagen: ${descripcion}
+    - REGLA DE ADAPTACIÓN CONTEXTUAL: Analiza cuidadosamente la descripción. NO asumas ubicaciones ni usos (por ejemplo, NO digas "para interiores" o "ideal para departamento/escritorio" si el producto es grande, rústico o está pensado para terrazas/jardines/exteriores). Acompáñate estricta y únicamente del contexto de uso inferido por el tamaño, material y detalles entregados.
+    - Tono: Profesional, cercano, inspirador y adaptado al público objetivo del producto.
+
+    INSTRUCCIONES DE FORMATO:
+    Responde ÚNICAMENTE en formato JSON estricto sin bloques de texto adicional, texto introductorio ni formato Markdown fuera del objeto JSON:
+    {
+      "caption": "Texto llamativo con ganchos persuasivos, descripción adaptada al contexto real del producto, llamadas a la acción (CTA) efectivas y emojis acordes.",
+      "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"],
+      "sugerencia_visual": "Idea rápida de qué composición visual o encuadre potenciaría este post"
+    }
+  `;
 
   let ultimoError = null;
 
