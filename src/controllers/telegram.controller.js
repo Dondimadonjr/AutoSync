@@ -150,9 +150,11 @@ async function handleWebhook(req, res) {
           logger.info('Archivo multimedia recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id, mediaGroupId });
 
           // A. Si es un ÁLBUM / CARRUSEL (múltiples imágenes/videos juntos)
+          // A. Si es un ÁLBUM / CARRUSEL (múltiples imágenes/videos juntos)
           if (mediaGroupId) {
             const mediaUrlTemp = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
 
+            // Buscar si ya existe un borrador para este grupo de medios
             const { data: pubExistente } = await supabase
               .from('publicaciones')
               .select('*')
@@ -160,18 +162,31 @@ async function handleWebhook(req, res) {
               .maybeSingle();
 
             if (pubExistente) {
+              // Agregar la URL al arreglo sin regenerar propuesta ni enviar mensajes duplicados
               const urlsActualizadas = [...(pubExistente.media_urls || [pubExistente.media_url]), mediaUrlTemp];
               
-              await supabase
+              const { data: pubActualizada } = await supabase
                 .from('publicaciones')
                 .update({ 
                   media_urls: urlsActualizadas,
                   tipo_publicacion: 'CAROUSEL'
                 })
-                .eq('id', pubExistente.id);
+                .eq('id', pubExistente.id)
+                .select('*')
+                .single();
 
+              // Si es el segundo archivo recibido, enviar directamente la botonera final
+              if (urlsActualizadas.length === 2) {
+                await enviarPropuestaInteractivamente(
+                  chatId, 
+                  pubActualizada.id, 
+                  pubActualizada.caption, 
+                  pubActualizada.media_url
+                );
+              }
               return;
             } else {
+              // Crear el borrador del carrusel (solo 1 vez)
               await sendMessage(chatId, '📥 Álbum de carrusel detectado. Procesando imágenes y generando propuesta con la IA...');
 
               const tipoContenido = 'Carrusel para Instagram';
@@ -199,22 +214,6 @@ async function handleWebhook(req, res) {
                 .single();
 
               if (dbErr) throw dbErr;
-
-              setTimeout(async () => {
-                const { data: pubFinal } = await supabase
-                  .from('publicaciones')
-                  .select('*')
-                  .eq('id', nuevaPub.id)
-                  .single();
-
-                await enviarPropuestaInteractivamente(
-                  chatId, 
-                  pubFinal.id, 
-                  propuesta, 
-                  pubFinal.media_url
-                );
-              }, 4000);
-
               return;
             }
           }
