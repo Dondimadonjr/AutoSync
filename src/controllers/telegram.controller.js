@@ -28,27 +28,37 @@ async function handleWebhook(req, res) {
           const publicacionId = estadosProgramacion.get(chatId);
           estadosProgramacion.delete(chatId);
 
-          // Formatear el texto de entrada para asegurar interpretación en hora local
-          const textoLimpio = text.trim().replace(' ', 'T');
-          // Asumimos zona horaria local (ej: -03:00 / -04:00) o dejamos que ISO cree la fecha exacta
-          const fechaProgramada = new Date(textoLimpio);
+          // Limpiar texto de entrada del usuario
+          const textoLimpio = text.trim();
+          
+          // Separar Fecha y Hora
+          const [fechaPart, horaPart] = textoLimpio.split(' ');
+
+          let fechaProgramada;
+          if (fechaPart && horaPart) {
+            // Especificar explícitamente el offset de zona horaria local (Chile GMT-4)
+            const isoLocalConOffset = `${fechaPart}T${horaPart}:00-04:00`;
+            fechaProgramada = new Date(isoLocalConOffset);
+          } else {
+            fechaProgramada = new Date(textoLimpio);
+          }
 
           if (isNaN(fechaProgramada.getTime())) {
             await sendMessage(
               chatId,
-              '❌ *Formato de fecha inválido.* Por favor escribe la fecha con el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-03 22:12`).'
+              '❌ *Formato de fecha inválido.* Por favor escribe la fecha con el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-05 20:50`).'
             );
             return;
           }
 
-          // Convertir a string ISO para almacenar de manera unificada
-          const isoFecha = fechaProgramada.toISOString();
+          // Convertir a cadena ISO en formato UTC para almacenar en Supabase
+          const isoFechaUTC = fechaProgramada.toISOString();
 
           // Actualizar en Supabase
           const { data: pubActualizada, error: updateError } = await supabase
             .from('publicaciones')
             .update({
-              programado_para: isoFecha,
+              programado_para: isoFechaUTC,
               estado: POST_STATUS.PROGRAMADO || 'PROGRAMADO',
             })
             .eq('id', publicacionId)
@@ -57,9 +67,16 @@ async function handleWebhook(req, res) {
 
           if (updateError) throw updateError;
 
+          // Formatear mensaje de confirmación mostrando la hora en español
+          const fechaFormateada = fechaProgramada.toLocaleString('es-CL', {
+            timeZone: 'America/Santiago',
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          });
+
           await sendMessage(
             chatId,
-            `📅 *Publicación programada exitosamente para:* *${fechaProgramada.toLocaleString('es-ES')}*\n\n` +
+            `📅 *Publicación programada exitosamente para:* *${fechaFormateada}*\n\n` +
             `Si deseas cambiar la fecha o editar el texto antes de publicarse, usa los botones a continuación:`
           );
 
@@ -174,7 +191,7 @@ async function handleWebhook(req, res) {
           estadosEdicion.delete(chatId);
           await sendMessage(
             chatId,
-            `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 18:30\``
+            `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 20:50\``
           );
         } else if (accion === 'editar') {
           // Activar flujo de edición de caption
