@@ -34,7 +34,7 @@ module.exports = async function handler(req, res) {
     // 2. Publicar cada post pendiente
     for (const pub of pendientes) {
       try {
-        // Obtener credenciales de Instagram asociadas al cliente de la tabla credenciales_redes
+        // Obtener credenciales de Instagram asociadas al cliente
         const { data: credsList, error: credsErr } = await supabase
           .from('credenciales_redes')
           .select('*')
@@ -58,16 +58,19 @@ module.exports = async function handler(req, res) {
           pub.caption
         );
 
-        // Actualizar estado a PUBLICADO en Supabase
-        await supabase
+        // Actualizar estado a PUBLICADO en Supabase (solo usando columnas válidas)
+        const { error: updateError } = await supabase
           .from('publicaciones')
           .update({
             estado: 'PUBLICADO',
-            instagram_post_id: resultado.postId,
             meta_post_id: resultado.postId,
             publicado_en: new Date().toISOString(),
           })
           .eq('id', pub.id);
+
+        if (updateError) {
+          throw new Error(`Error de Supabase al actualizar estado: ${updateError.message}`);
+        }
 
         // Notificar al canal/chat de Telegram
         const chatId = pub.clientes?.telegram_chat_id || process.env.TELEGRAM_ADMIN_CHAT_ID;
@@ -79,7 +82,6 @@ module.exports = async function handler(req, res) {
           );
         }
       } catch (pubErr) {
-        // Capturar la respuesta técnica explícita de Meta (si existe) o el mensaje de error
         const metaErrorMsg = pubErr.response?.data?.error?.message 
           || (typeof pubErr.response?.data === 'object' ? JSON.stringify(pubErr.response?.data) : pubErr.message);
 
