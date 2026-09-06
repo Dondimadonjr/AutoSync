@@ -26,6 +26,26 @@ async function registrarLog(publicacionId, evento, nivel = 'INFO', payload = {})
  */
 async function procesarAprobacionAsync(publicacionId, chatId) {
   logger.info('Iniciando flujo de procesamiento de publicación', { publicacionId, chatId });
+  
+  let resultado;
+
+  if (publicacion.tipo_publicacion === 'STORY') {
+    // Comprobar si es un video o imagen según la extensión
+    const esVideo = publicacion.media_url.includes('.mp4');
+    resultado = await publicarStoryInstagram(
+      creds.cuenta_id,
+      creds.token_acceso,
+      publicacion.media_url,
+      esVideo
+    );
+  } else {
+    resultado = await publicarEnInstagram(
+      creds.cuenta_id,
+      creds.token_acceso,
+      publicacion.media_url,
+      publicacion.caption
+    );
+  }
 
   try {
     // 1. Obtener la publicación actual de Supabase
