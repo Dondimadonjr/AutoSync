@@ -26,6 +26,9 @@ async function handleWebhook(req, res) {
 
   const tareaWebhook = (async () => {
     try {
+      // ---------------------------------------------------------------------
+      // A. MENSAJES DE TEXTO Y ARCHIVOS MULTIMEDIA
+      // ---------------------------------------------------------------------
       if (update.message) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
@@ -48,8 +51,7 @@ async function handleWebhook(req, res) {
 
             let fechaProgramada;
             if (fechaPart && horaPart) {
-              // Offset explícito de Chile (GMT-4)
-              const offsetHorario = '-03:00'; // Ajusta según el horario chileno (verano/invierno)
+              const offsetHorario = '-03:00'; // Ajuste de zona horaria de Chile
               const isoLocalConOffset = `${fechaPart}T${horaPart}:00${offsetHorario}`;
               fechaProgramada = new Date(isoLocalConOffset);
             } else {
@@ -138,48 +140,116 @@ async function handleWebhook(req, res) {
           }
         }
 
-        // 2. Manejo de subida de Multimedia (Videos / Fotos)
+        // 2. Manejo de subida de Multimedia (Archivos individuales y Carruseles/Álbumes)
+        const mediaGroupId = update.message.media_group_id;
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
         const fotoArchivo = photo ? photo[photo.length - 1] : null;
         const archivoMultimedia = videoArchivo || fotoArchivo;
 
         if (archivoMultimedia) {
-          logger.info('Archivo multimedia recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id });
-          await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando la propuesta con la IA...');
+          logger.info('Archivo multimedia recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id, mediaGroupId });
 
-          try {
-            const mediaUrl = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
-            const tipoContenido = fotoArchivo ? 'Imagen para Instagram' : 'Reel de Instagram';
-            const descripcion = caption || 'Publicación visual atractiva para redes sociales';
+          // A. Si es un ÁLBUM / CARRUSEL (múltiples imágenes/videos juntos)
+          if (mediaGroupId) {
+            const mediaUrlTemp = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
 
-            const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
-            const captionTexto = formatearCaptionIA(propuesta);
-
-            let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
-            const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
-            if (clienteDB) clienteId = clienteDB.id;
-
-            const { data: nuevaPublicacion, error: dbError } = await supabase
+            const { data: pubExistente } = await supabase
               .from('publicaciones')
-              .insert({
-                cliente_id: clienteId,
-                caption: captionTexto,
-                media_url: mediaUrl,
-                plataformas: ['instagram'],
-                tipo_publicacion: 'FEED',
-                estado: 'borrador',
-              })
-              .select('id')
-              .single();
+              .select('*')
+              .eq('media_group_id', mediaGroupId)
+              .maybeSingle();
 
-            if (dbError) throw dbError;
+            if (pubExistente) {
+              const urlsActualizadas = [...(pubExistente.media_urls || [pubExistente.media_url]), mediaUrlTemp];
+              
+              await supabase
+                .from('publicaciones')
+                .update({ 
+                  media_urls: urlsActualizadas,
+                  tipo_publicacion: 'CAROUSEL'
+                })
+                .eq('id', pubExistente.id);
 
-            await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
+              return;
+            } else {
+              await sendMessage(chatId, '📥 Álbum de carrusel detectado. Procesando imágenes y generando propuesta con la IA...');
 
-          } catch (subError) {
-            logger.error('Error procesando multimedia:', { error: subError.message });
-            await sendMessage(chatId, `❌ Error durante el procesamiento: *${subError.message}*`);
+              const tipoContenido = 'Carrusel para Instagram';
+              const descripcion = caption || 'Publicación en carrusel con múltiples imágenes/videos';
+              const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
+              const captionTexto = formatearCaptionIA(propuesta);
+
+              let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
+              const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
+              if (clienteDB) clienteId = clienteDB.id;
+
+              const { data: nuevaPub, error: dbErr } = await supabase
+                .from('publicaciones')
+                .insert({
+                  cliente_id: clienteId,
+                  caption: captionTexto,
+                  media_url: mediaUrlTemp,
+                  media_urls: [mediaUrlTemp],
+                  media_group_id: mediaGroupId,
+                  plataformas: ['instagram'],
+                  tipo_publicacion: 'CAROUSEL',
+                  estado: 'borrador',
+                })
+                .select('id')
+                .single();
+
+              if (dbErr) throw dbErr;
+
+              setTimeout(async () => {
+                const { data: pubFinal } = await supabase
+                  .from('publicaciones')
+                  .select('*')
+                  .eq('id', nuevaPub.id)
+                  .single();
+
+                await enviarPropuestaInteractivamente(
+                  chatId, 
+                  pubFinal.id, 
+                  propuesta, 
+                  pubFinal.media_url
+                );
+              }, 4000);
+
+              return;
+            }
           }
+
+          // B. Si es un ARCHIVO ÚNICO (Post Normal / Story)
+          await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando propuesta...');
+
+          const mediaUrl = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
+          const tipoContenido = fotoArchivo ? 'Imagen para Instagram' : 'Reel de Instagram';
+          const descripcion = caption || 'Publicación visual atractiva para redes sociales';
+
+          const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
+          const captionTexto = formatearCaptionIA(propuesta);
+
+          let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
+          const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
+          if (clienteDB) clienteId = clienteDB.id;
+
+          const { data: nuevaPublicacion, error: dbError } = await supabase
+            .from('publicaciones')
+            .insert({
+              cliente_id: clienteId,
+              caption: captionTexto,
+              media_url: mediaUrl,
+              media_urls: [mediaUrl],
+              plataformas: ['instagram'],
+              tipo_publicacion: 'FEED',
+              estado: 'borrador',
+            })
+            .select('id')
+            .single();
+
+          if (dbError) throw dbError;
+
+          await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
           return;
         }
 
@@ -193,9 +263,11 @@ async function handleWebhook(req, res) {
           );
           return;
         }
-      }
+      } // Fin de if (update.message)
 
-      // 4. Manejo de Botones Interactivos (Callback Query)
+      // ---------------------------------------------------------------------
+      // B. BOTONES INTERACTIVOS (CALLBACK QUERY)
+      // ---------------------------------------------------------------------
       if (update.callback_query) {
         const { id: callbackQueryId, message, data } = update.callback_query;
         const chatId = message.chat.id;

@@ -3,7 +3,8 @@ const logger = require('../config/logger');
 const { POST_STATUS } = require('../constants');
 const { 
   publicarEnInstagram, 
-  publicarStoryInstagram 
+  publicarStoryInstagram,
+  publicarCarruselInstagram 
 } = require('./meta.service');
 const { sendMessage } = require('./telegram.service');
 
@@ -24,7 +25,7 @@ async function registrarLog(publicacionId, evento, nivel = 'INFO', payload = {})
 }
 
 /**
- * Procesa la aprobación y publicación asíncrona de un contenido en Instagram (Feed o Story)
+ * Procesa la aprobación y publicación asíncrona de un contenido en Instagram (Feed, Story o Carrusel)
  */
 async function procesarAprobacionAsync(publicacionId, chatId) {
   logger.info('Iniciando flujo de procesamiento de publicación', { publicacionId, chatId });
@@ -69,11 +70,18 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       return;
     }
 
-    // 3. Ejecutar publicación según el formato (STORY o FEED/REELS)
+    // 3. Ejecutar publicación según el formato (CAROUSEL, STORY o FEED/REELS)
     let resultado;
     const esVideo = publicacion.media_url?.includes('.mp4');
 
-    if (publicacion.tipo_publicacion === 'STORY') {
+    if (publicacion.tipo_publicacion === 'CAROUSEL' && Array.isArray(publicacion.media_urls) && publicacion.media_urls.length > 1) {
+      resultado = await publicarCarruselInstagram(
+        instagramAccountId,
+        accessToken,
+        publicacion.media_urls,
+        publicacion.caption
+      );
+    } else if (publicacion.tipo_publicacion === 'STORY') {
       resultado = await publicarStoryInstagram(
         instagramAccountId,
         accessToken,
@@ -96,21 +104,36 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       .from('publicaciones')
       .update({
         estado: POST_STATUS.PUBLICADO || 'PUBLICADO',
+        meta_post_id: postId,
         publicado_en: new Date().toISOString(),
       })
       .eq('id', publicacionId);
 
     if (updateError) {
-      logger.error(`Error de Supabase al actualizar estado en post ${publicacionId}:`, updateError);
+      // Reintento sin la columna meta_post_id si no existe aún en el esquema
+      if (updateError.code === 'PGRST204') {
+        await supabase
+          .from('publicaciones')
+          .update({
+            estado: POST_STATUS.PUBLICADO || 'PUBLICADO',
+            publicado_en: new Date().toISOString(),
+          })
+          .eq('id', publicacionId);
+      } else {
+        logger.error(`Error de Supabase al actualizar estado en post ${publicacionId}:`, updateError);
+      }
     }
 
     await registrarLog(publicacionId, 'PUBLICACION_EXITOSA', 'INFO', { postId });
 
     // 5. Notificar confirmación en Telegram
-    const formatoMsg = publicacion.tipo_publicacion === 'STORY' ? 'Historia / Story' : 'Feed';
+    let formatoTexto = 'Feed';
+    if (publicacion.tipo_publicacion === 'STORY') formatoTexto = 'Historia / Story';
+    if (publicacion.tipo_publicacion === 'CAROUSEL') formatoTexto = 'Carrusel';
+
     await sendMessage(
       chatId,
-      `🎉 *¡Publicado con éxito en Instagram (${formatoMsg})!*\n📌 *ID Post:* \`${postId}\``
+      `🎉 *¡Publicado con éxito en Instagram (${formatoTexto})!*\n📌 *ID Post:* \`${postId}\``
     );
 
   } catch (error) {
