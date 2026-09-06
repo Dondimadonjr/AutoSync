@@ -49,7 +49,8 @@ async function handleWebhook(req, res) {
             let fechaProgramada;
             if (fechaPart && horaPart) {
               // Offset explícito de Chile (GMT-4)
-              const isoLocalConOffset = `${fechaPart}T${horaPart}:00-04:00`;
+              const offsetHorario = '-03:00'; // Ajusta según el horario chileno (verano/invierno)
+              const isoLocalConOffset = `${fechaPart}T${horaPart}:00${offsetHorario}`;
               fechaProgramada = new Date(isoLocalConOffset);
             } else {
               fechaProgramada = new Date(textoLimpio);
