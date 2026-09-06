@@ -28,15 +28,12 @@ async function handleWebhook(req, res) {
           const publicacionId = estadosProgramacion.get(chatId);
           estadosProgramacion.delete(chatId);
 
-          // Limpiar texto de entrada del usuario
           const textoLimpio = text.trim();
-          
-          // Separar Fecha y Hora
           const [fechaPart, horaPart] = textoLimpio.split(' ');
 
           let fechaProgramada;
           if (fechaPart && horaPart) {
-            // Especificar explícitamente el offset de zona horaria local (Chile GMT-4)
+            // Aplicar el desfase de Chile (GMT-4) de forma explícita
             const isoLocalConOffset = `${fechaPart}T${horaPart}:00-04:00`;
             fechaProgramada = new Date(isoLocalConOffset);
           } else {
@@ -46,12 +43,11 @@ async function handleWebhook(req, res) {
           if (isNaN(fechaProgramada.getTime())) {
             await sendMessage(
               chatId,
-              '❌ *Formato de fecha inválido.* Por favor escribe la fecha con el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-05 20:50`).'
+              '❌ *Formato de fecha inválido.* Escribe la fecha con el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-05 21:00`).'
             );
             return;
           }
 
-          // Convertir a cadena ISO en formato UTC para almacenar en Supabase
           const isoFechaUTC = fechaProgramada.toISOString();
 
           // Actualizar en Supabase
@@ -65,18 +61,14 @@ async function handleWebhook(req, res) {
             .select('*')
             .single();
 
-          if (updateError) throw updateError;
-
-          // Formatear mensaje de confirmación mostrando la hora en español
-          const fechaFormateada = fechaProgramada.toLocaleString('es-CL', {
-            timeZone: 'America/Santiago',
-            dateStyle: 'medium',
-            timeStyle: 'short',
-          });
+          if (updateError) {
+            logger.error('Error actualizando fecha en Supabase:', updateError);
+            throw updateError;
+          }
 
           await sendMessage(
             chatId,
-            `📅 *Publicación programada exitosamente para:* *${fechaFormateada}*\n\n` +
+            `📅 *Publicación programada exitosamente para:* *${fechaPart} a las ${horaPart}*\n\n` +
             `Si deseas cambiar la fecha o editar el texto antes de publicarse, usa los botones a continuación:`
           );
 
