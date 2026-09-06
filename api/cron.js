@@ -6,9 +6,9 @@ const logger = require('../src/config/logger');
 module.exports = async function handler(req, res) {
   // Verificar cabecera de seguridad enviada por Vercel Cron
   const authHeader = req.headers.authorization;
-    if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
-    return res.status(401).json({ error: 'No autorizado' });
-  }
+ // if (process.env.CRON_SECRET && authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  //  return res.status(401).json({ error: 'No autorizado' });
+  //}
 
   try {
     const ahora = new Date().toISOString();
