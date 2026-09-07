@@ -9,7 +9,7 @@ const {
 const { sendMessage } = require('./telegram.service');
 
 /**
- * Registra un evento en la tabla de auditoría logs_publicacion si existe
+ * Registra un evento en la tabla de auditoría logs_publicacion
  */
 async function registrarLog(publicacionId, evento, nivel = 'INFO', payload = {}) {
   try {
@@ -31,7 +31,7 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
   logger.info('Iniciando flujo de procesamiento de publicación', { publicacionId, chatId });
 
   try {
-    // 1. Obtener la publicación de Supabase para obtener cliente_id y datos del post
+    // 1. Obtener publicación de Supabase
     const { data: publicacion, error: fetchErr } = await supabase
       .from('publicaciones')
       .select('*, clientes(*)')
@@ -49,7 +49,7 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       return;
     }
 
-    // 2. Obtener credenciales de Instagram para el cliente
+    // 2. Obtener credenciales de Instagram
     const { data: credsList, error: credsErr } = await supabase
       .from('credenciales_redes')
       .select('*')
@@ -59,7 +59,6 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
 
     const creds = credsList && credsList.length > 0 ? credsList[0] : null;
 
-    // Extraer ID de cuenta y Access Token con fallbacks seguros
     const instagramAccountId = creds?.cuenta_id || creds?.instagram_account_id || process.env.INSTAGRAM_ACCOUNT_ID;
     const accessToken = creds?.token_acceso || creds?.access_token || process.env.META_ACCESS_TOKEN;
 
@@ -70,20 +69,26 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       return;
     }
 
-    // 3. Ejecutar publicación según el formato (CAROUSEL, STORY o FEED/REELS)
-    // 3. Ejecutar publicación según el formato (CAROUSEL, STORY o FEED/REELS)
-    let resultado;
-    const esVideo = publicacion.media_url?.includes('.mp4');
-    const tieneMultiplesArchivos = Array.isArray(publicacion.media_urls) && publicacion.media_urls.length > 1;
+    // 3. Normalizar la lista de URLs (garantiza arreglo con fallback a media_url)
+    const listaUrls = Array.isArray(publicacion.media_urls) && publicacion.media_urls.length > 0
+      ? publicacion.media_urls
+      : (publicacion.media_url ? [publicacion.media_url] : []);
 
-    if (publicacion.tipo_publicacion === 'CAROUSEL' || tieneMultiplesArchivos) {
-      logger.info(`Iniciando publicación de Carrusel con ${publicacion.media_urls.length} elementos.`);
+    let resultado;
+    let formatoTexto = 'Feed';
+    const esVideo = publicacion.media_url?.includes('.mp4');
+
+    // Forzar Carrusel si hay múltiples archivos o si la marca explícita es CAROUSEL
+    if (listaUrls.length > 1 || publicacion.tipo_publicacion === 'CAROUSEL') {
+      logger.info(`Ejecutando publicación de Carrusel con ${listaUrls.length} archivo(s).`, { publicacionId });
       resultado = await publicarCarruselInstagram(
         instagramAccountId,
         accessToken,
-        publicacion.media_urls,
+        listaUrls,
         publicacion.caption
       );
+      formatoTexto = 'Carrusel';
+
     } else if (publicacion.tipo_publicacion === 'STORY') {
       resultado = await publicarStoryInstagram(
         instagramAccountId,
@@ -91,6 +96,8 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
         publicacion.media_url,
         esVideo
       );
+      formatoTexto = 'Historia / Story';
+
     } else {
       resultado = await publicarEnInstagram(
         instagramAccountId,
@@ -98,42 +105,39 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
         publicacion.media_url,
         publicacion.caption
       );
+      formatoTexto = 'Feed';
     }
 
     const postId = resultado.postId;
 
-    // 4. Actualizar estado a PUBLICADO en Supabase
+    // 4. Actualizar estado a PUBLICADO en Supabase (con fallback seguro para meta_post_id)
+    const payloadUpdate = {
+      estado: POST_STATUS.PUBLICADO || 'PUBLICADO',
+      meta_post_id: postId,
+      publicado_en: new Date().toISOString(),
+    };
+
     const { error: updateError } = await supabase
       .from('publicaciones')
-      .update({
-        estado: POST_STATUS.PUBLICADO || 'PUBLICADO',
-        meta_post_id: postId,
-        publicado_en: new Date().toISOString(),
-      })
+      .update(payloadUpdate)
       .eq('id', publicacionId);
 
     if (updateError) {
-      // Reintento sin la columna meta_post_id si no existe aún en el esquema
       if (updateError.code === 'PGRST204') {
+        // La columna meta_post_id no existe en la BD, reintentar sin ella
+        delete payloadUpdate.meta_post_id;
         await supabase
           .from('publicaciones')
-          .update({
-            estado: POST_STATUS.PUBLICADO || 'PUBLICADO',
-            publicado_en: new Date().toISOString(),
-          })
+          .update(payloadUpdate)
           .eq('id', publicacionId);
       } else {
         logger.error(`Error de Supabase al actualizar estado en post ${publicacionId}:`, updateError);
       }
     }
 
-    await registrarLog(publicacionId, 'PUBLICACION_EXITOSA', 'INFO', { postId });
+    await registrarLog(publicacionId, 'PUBLICACION_EXITOSA', 'INFO', { postId, formato: formatoTexto });
 
     // 5. Notificar confirmación en Telegram
-    let formatoTexto = 'Feed';
-    if (publicacion.tipo_publicacion === 'STORY') formatoTexto = 'Historia / Story';
-    if (publicacion.tipo_publicacion === 'CAROUSEL') formatoTexto = 'Carrusel';
-
     await sendMessage(
       chatId,
       `🎉 *¡Publicado con éxito en Instagram (${formatoTexto})!*\n📌 *ID Post:* \`${postId}\``
@@ -148,7 +152,6 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       errorMeta: metaErrorDetails,
     });
 
-    // Actualizar estado a RECHAZADO/ERROR para evitar bucles
     await supabase
       .from('publicaciones')
       .update({ estado: POST_STATUS.RECHAZADO || 'ERROR' })

@@ -5,15 +5,20 @@ const logger = require('../config/logger');
 
 const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
+// Se actualiza el nombre del modelo a la versión estable de producción
 const MODELO_OFICIAL = 'gemini-3.6-flash';
 const MAX_INTENTOS = 3;
 
 const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Genera una propuesta de copy, hashtags y sugerencia visual mediante Gemini API
+ */
 async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 'Instagram/TikTok') {
   let producto = input;
   let descripcion = descripcionCorta;
 
+  // Normalización del parámetro de entrada en caso de ser objeto o string
   if (typeof input === 'object' && input !== null) {
     producto = input.producto || input.nombreProducto || 'Producto';
     descripcion = input.descripcion || input.descripcionCorta || '';
@@ -55,10 +60,13 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
       });
 
       let rawText = response.text || '';
-      rawText = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      
+      // Limpieza defensiva de marcadores Markdown por si la IA entrega formato envuelto
+      rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
       const parsed = JSON.parse(rawText);
 
+      // Normalización del campo hashtags
       if (typeof parsed.hashtags === 'string') {
         parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
       } else if (!Array.isArray(parsed.hashtags)) {

@@ -19,7 +19,7 @@ function formatearCaptionIA(propuesta) {
 }
 
 async function handleWebhook(req, res) {
-  // Responder inmediatamente 200 a Telegram
+  // Responder inmediatamente HTTP 200 a Telegram para evitar timeouts
   res.status(200).json({ ok: true });
 
   const update = req.body;
@@ -34,10 +34,10 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        // 1. Manejo de entradas de texto libre (esperando FECHA o NUEVO TEXTO)
+        // 1. Manejo de entradas de texto libre (esperando FECHA o EDICIÓN)
         if (text && !text.startsWith('/')) {
           
-          // A. Si la publicación está esperando FECHA DE PROGRAMACIÓN
+          // A. Estado: PENDIENTE_FECHA
           const { data: pubPendienteFecha } = await supabase
             .from('publicaciones')
             .select('*')
@@ -96,7 +96,7 @@ async function handleWebhook(req, res) {
             return;
           }
 
-          // B. Si la publicación está esperando EDICIÓN
+          // B. Estado: PENDIENTE_EDITAR
           const { data: pubPendienteEditar } = await supabase
             .from('publicaciones')
             .select('*')
@@ -141,7 +141,7 @@ async function handleWebhook(req, res) {
           }
         }
 
-        // 2. Manejo de subida de Multimedia (Archivos individuales y Carruseles/Álbumes)
+        // 2. Manejo de subida de Multimedia (Post Normal, Reels, Stories o Carrusel)
         const mediaGroupId = update.message.media_group_id;
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
         const fotoArchivo = photo ? photo[photo.length - 1] : null;
@@ -150,19 +150,21 @@ async function handleWebhook(req, res) {
         if (archivoMultimedia) {
           logger.info('Archivo multimedia recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id, mediaGroupId });
 
-          // A. Si es un ÁLBUM / CARRUSEL (múltiples imágenes/videos juntos)
+          // A. Manejo de ÁLBUM / CARRUSEL (media_group_id)
           if (mediaGroupId) {
             const mediaUrlTemp = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
 
-            // Intentar buscar si ya existe un borrador previo para este media_group_id
+            // Buscar si ya existe un borrador reciente para este álbum
             const { data: pubExistente } = await supabase
               .from('publicaciones')
               .select('*')
               .eq('media_group_id', mediaGroupId)
+              .order('creado_en', { ascending: false })
+              .limit(1)
               .maybeSingle();
 
             if (pubExistente) {
-              // Si ya existe la primera foto, anexar esta nueva URL al array media_urls
+              // Si el registro ya existe, adjuntar la nueva URL sin duplicar la IA ni los mensajes
               const urlsActualizadas = Array.from(
                 new Set([...(pubExistente.media_urls || [pubExistente.media_url]), mediaUrlTemp])
               );
@@ -175,10 +177,10 @@ async function handleWebhook(req, res) {
                 })
                 .eq('id', pubExistente.id);
 
-              return; // Salir sin enviar mensajes duplicados
+              return; // Salir silenciosamente para peticiones secundarias del álbum
             }
 
-            // Si es la PRIMERA imagen que entra del álbum:
+            // Primera imagen del álbum: notificar, consultar a la IA e insertar borrador
             await sendMessage(chatId, '📥 Álbum de carrusel detectado. Procesando imágenes y generando propuesta con la IA...');
 
             const tipoContenido = 'Carrusel para Instagram';
@@ -190,7 +192,6 @@ async function handleWebhook(req, res) {
             const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
             if (clienteDB) clienteId = clienteDB.id;
 
-            // Insertar el borrador base
             const { data: nuevaPub, error: dbErr } = await supabase
               .from('publicaciones')
               .insert({
@@ -208,17 +209,16 @@ async function handleWebhook(req, res) {
 
             if (dbErr) throw dbErr;
 
-            // Pausa estratégica de 3.5s para consolidar todas las fotos enviadas por los webhooks paralelos
-            await new Promise((resolve) => setTimeout(resolve, 3500));
+            // Pausa de consolidación para recolectar los webhooks paralelos de Telegram
+            await new Promise((resolve) => setTimeout(resolve, 4000));
 
-            // Obtener el registro actualizado con el array completo de URLs
+            // Consultar las URLs consolidadas y enviar la propuesta interactiva
             const { data: pubFinal } = await supabase
               .from('publicaciones')
               .select('*')
               .eq('id', nuevaPub.id)
               .single();
 
-            // Enviar la propuesta interactiva final con los botones
             await enviarPropuestaInteractivamente(
               chatId, 
               pubFinal.id, 
@@ -228,7 +228,7 @@ async function handleWebhook(req, res) {
             return;
           }
 
-          // B. Si es un ARCHIVO ÚNICO (Post Normal / Story)
+          // B. ARCHIVO ÚNICO (Feed / Story / Reel)
           await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando propuesta...');
 
           const mediaUrl = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
@@ -290,7 +290,7 @@ async function handleWebhook(req, res) {
           const tipoSeleccionado = parts[1]; // 'FEED' o 'STORY'
           const realPublicacionId = parts.slice(2).join('_');
 
-          // Consultar si es una publicación con múltiples imágenes
+          // Preservar tipo CAROUSEL si existen múltiples elementos en media_urls
           const { data: pubActual } = await supabase
             .from('publicaciones')
             .select('media_urls')
