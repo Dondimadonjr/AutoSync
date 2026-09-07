@@ -14,6 +14,7 @@ const PLATFORMS = Object.freeze({
   INSTAGRAM: 'instagram',
   TIKTOK: 'tiktok',
   FACEBOOK: 'facebook',
+  THREADS: 'threads',
 });
 
 const META_GRAPH_VERSION = 'v19.0';

@@ -209,9 +209,6 @@ async function publicarEnFacebook(pageId, pageAccessToken, mediaUrl, caption) {
 }
 
 /**
- * Publica una Historia (Story) en una Página de Facebook
- */
-/**
  * Publica contenido en Facebook cuando en Telegram se marca como formato Story
  */
 async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo = false) {
