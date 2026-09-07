@@ -69,15 +69,20 @@ async function listarPublicacionesAgendadas(chatId, publicaciones) {
 
   publicaciones.forEach((pub, index) => {
     const fecha = new Date(pub.programado_para).toLocaleString('es-CL', { timeZone: 'America/Santiago' });
-    const previewCaption = pub.caption ? pub.caption.substring(0, 60) + '...' : 'Sin texto';
+    const previewCaption = pub.caption ? pub.caption.substring(0, 50) + '...' : 'Sin texto';
     
     texto += `*${index + 1}. [${pub.tipo_publicacion}]* - ${fecha}\n`;
     texto += `📝 _${previewCaption}_\n\n`;
   });
 
-  const inlineKeyboard = publicaciones.map((pub, index) => [
-    { text: `❌ Cancelar #${index + 1}`, callback_data: `cancelaragendado_${pub.id}` }
-  ]);
+  const inlineKeyboard = [];
+
+  publicaciones.forEach((pub, index) => {
+    inlineKeyboard.push([
+      { text: `✏️ Reprogramar #${index + 1}`, callback_data: `reprogramar_${pub.id}` },
+      { text: `❌ Cancelar #${index + 1}`, callback_data: `cancelaragendado_${pub.id}` }
+    ]);
+  });
 
   return sendInlineKeyboard(chatId, texto, inlineKeyboard);
 }

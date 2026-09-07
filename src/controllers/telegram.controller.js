@@ -280,7 +280,7 @@ async function handleWebhook(req, res) {
           await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
           return;
         }
-      } 
+      } // Fin de if (update.message)
 
       // ---------------------------------------------------------------------
       // B. BOTONES INTERACTIVOS (CALLBACK QUERY)
@@ -309,6 +309,25 @@ async function handleWebhook(req, res) {
           }
 
           await sendMessage(chatId, `🗑️ *Publicación programada cancelada con éxito.*`);
+
+        } else if (accion === 'reprogramar') {
+          const pubId = parts.slice(1).join('_');
+
+          const { error: updateError } = await supabase
+            .from('publicaciones')
+            .update({ estado: 'PENDIENTE_FECHA' })
+            .eq('id', pubId);
+
+          if (updateError) {
+            logger.error('Error al activar reprogramación:', updateError);
+            await sendMessage(chatId, '❌ No se pudo activar la reprogramación.');
+            return;
+          }
+
+          await sendMessage(
+            chatId,
+            `📅 *Reprogramación activada.*\n\nEscribe la nueva fecha y hora en formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-10 18:30\``
+          );
 
         } else if (accion === 'tipo') {
           const tipoSeleccionado = parts[1]; // 'FEED' o 'STORY'
@@ -369,7 +388,7 @@ async function handleWebhook(req, res) {
             await procesarRechazo(publicacionId, chatId);
           }
         }
-      }
+      } // Fin de if (update.callback_query)
     } catch (error) {
       logger.error('Error general en Telegram Webhook:', { error: error.message, stack: error.stack });
     }
@@ -379,7 +398,5 @@ async function handleWebhook(req, res) {
     waitUntil(tareaWebhook);
   }
 }
-
-
 
 module.exports = { handleWebhook };
