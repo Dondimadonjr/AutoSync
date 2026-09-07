@@ -211,42 +211,45 @@ async function publicarEnFacebook(pageId, pageAccessToken, mediaUrl, caption) {
 /**
  * Publica una Historia (Story) en una Página de Facebook
  */
+/**
+ * Publica contenido en Facebook cuando en Telegram se marca como formato Story
+ */
 async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo = false) {
   try {
     if (isVideo) {
-      // Publicar video story en Facebook Page
-      const res = await axios.post(`${GRAPH_API_URL}/${pageId}/video_stories`, null, {
-        params: {
-          file_url: mediaUrl,
-          access_token: pageAccessToken,
-        },
-      });
-      logger.info('Video Story publicada exitosamente en Facebook Page:', res.data);
-      return { postId: res.data.id };
+      // Intentar video story en Facebook Page
+      try {
+        const res = await axios.post(`${GRAPH_API_URL}/${pageId}/video_stories`, null, {
+          params: {
+            file_url: mediaUrl,
+            access_token: pageAccessToken,
+          },
+        });
+        logger.info('Video Story publicada exitosamente en Facebook Page:', res.data);
+        return { postId: res.data.id };
+      } catch (videoStoryErr) {
+        logger.warn('Error en video_stories API, reintentando como video público de Facebook Page:', videoStoryErr.message);
+        const resVideo = await axios.post(`${GRAPH_API_URL}/${pageId}/videos`, null, {
+          params: {
+            file_url: mediaUrl,
+            access_token: pageAccessToken,
+          },
+        });
+        return { postId: resVideo.data.id };
+      }
     }
 
-    // Intentar publicar photo story
-    try {
-      const res = await axios.post(`${GRAPH_API_URL}/${pageId}/photo_stories`, null, {
-        params: {
-          url: mediaUrl,
-          access_token: pageAccessToken,
-        },
-      });
-      logger.info('Foto Story publicada exitosamente en Facebook Page:', res.data);
-      return { postId: res.data.id };
-    } catch (storyErr) {
-      logger.warn('Error publicando en photo_stories API, aplicando fallback a foto directa en Facebook:', storyErr.message);
-      
-      // Fallback a foto pública de la Página
-      const resFallback = await axios.post(`${GRAPH_API_URL}/${pageId}/photos`, null, {
-        params: {
-          url: mediaUrl,
-          access_token: pageAccessToken,
-        },
-      });
-      return { postId: resFallback.data.id };
-    }
+    // Publicar foto directa en la Página de Facebook (Evita el bloqueo de permisos #10 de photo_stories)
+    logger.info('Publicando imagen en Facebook Page como foto...', { pageId });
+    const resPhoto = await axios.post(`${GRAPH_API_URL}/${pageId}/photos`, null, {
+      params: {
+        url: mediaUrl,
+        access_token: pageAccessToken,
+      },
+    });
+
+    logger.info('Foto publicada exitosamente en Facebook Page:', resPhoto.data);
+    return { postId: resPhoto.data.id };
 
   } catch (error) {
     const errorMsg = error.response?.data?.error?.message || error.message;
