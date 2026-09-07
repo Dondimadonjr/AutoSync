@@ -52,14 +52,14 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       return;
     }
 
-    // 2. Normalizar la lista de URLs (garantiza arreglo con fallback a media_url)
+    // 2. Normalizar la lista de URLs
     const listaUrls = Array.isArray(publicacion.media_urls) && publicacion.media_urls.length > 0
       ? publicacion.media_urls
       : (publicacion.media_url ? [publicacion.media_url] : []);
 
     const esVideo = publicacion.media_url?.toLowerCase().includes('.mp4');
     
-    // Plataformas seleccionadas (por defecto ambas si viene vacío)
+    // Plataformas seleccionadas (por defecto ambas)
     const plataformas = (Array.isArray(publicacion.plataformas) && publicacion.plataformas.length > 0)
       ? publicacion.plataformas
       : ['instagram', 'facebook'];
@@ -70,16 +70,19 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
     // A. PUBLICAR EN INSTAGRAM
     // ---------------------------------------------------------------------
     if (plataformas.includes('instagram')) {
+      // Priorizar primero la búsqueda de credencial de Instagram, y si no existe usar Facebook
       const { data: credsList } = await supabase
         .from('credenciales_redes')
         .select('*')
         .eq('cliente_id', publicacion.cliente_id)
-        .eq('plataforma', 'instagram')
-        .limit(1);
+        .in('plataforma', ['instagram', 'facebook']);
 
-      const creds = credsList && credsList.length > 0 ? credsList[0] : null;
-      const instagramAccountId = creds?.cuenta_id || creds?.instagram_account_id || process.env.INSTAGRAM_ACCOUNT_ID;
-      const igAccessToken = creds?.token_acceso || creds?.access_token || process.env.META_ACCESS_TOKEN;
+      const credsIg = credsList?.find((c) => c.plataforma === 'instagram');
+      const credsFb = credsList?.find((c) => c.plataforma === 'facebook');
+
+      const instagramAccountId = credsIg?.cuenta_id || process.env.INSTAGRAM_ACCOUNT_ID;
+      // Usar el token específico de Instagram o el de Facebook (ya que el token de la página con permisos de negocio también gestiona la cuenta vinculada de IG)
+      const igAccessToken = credsIg?.token_acceso || credsFb?.token_acceso || process.env.META_ACCESS_TOKEN;
 
       if (!instagramAccountId || instagramAccountId === 'undefined') {
         logger.warn('Credenciales de Instagram no encontradas, saltando Instagram...', { clienteId: publicacion.cliente_id });
@@ -87,8 +90,7 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
         let resIg;
         let formatoTexto = 'Feed';
 
-        // EVALUACIÓN ORDENADA DE FORMATOS DE INSTAGRAM:
-        // 1. STORY tiene prioridad absoluta sobre Carrusel/Feed
+        // FORMATOS DE INSTAGRAM:
         if (publicacion.tipo_publicacion === 'STORY') {
           resIg = await publicarStoryInstagram(instagramAccountId, igAccessToken, publicacion.media_url, esVideo);
           formatoTexto = 'Historia / Story';
@@ -123,7 +125,7 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
 
       const credsFb = credsFbList && credsFbList.length > 0 ? credsFbList[0] : null;
       const facebookPageId = credsFb?.cuenta_id || process.env.FACEBOOK_PAGE_ID;
-      const fbAccessToken = credsFb?.token_acceso || credsFb?.access_token || process.env.META_ACCESS_TOKEN;
+      const fbAccessToken = credsFb?.token_acceso || process.env.META_ACCESS_TOKEN;
 
       if (!facebookPageId || facebookPageId === 'undefined') {
         logger.warn('Credenciales de Facebook no encontradas, saltando Facebook...', { clienteId: publicacion.cliente_id });
