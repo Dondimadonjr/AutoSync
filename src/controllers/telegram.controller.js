@@ -8,7 +8,7 @@ const supabase = require('../config/supabase');
 const { POST_STATUS } = require('../constants');
 
 /**
- * Formatea el objeto devuelto por la IA o string a formato texto con hashtags
+ * Formatea la propuesta devuelta por la IA a texto plano con hashtags
  */
 function formatearCaptionIA(propuesta) {
   if (typeof propuesta === 'object' && propuesta !== null) {
@@ -19,7 +19,7 @@ function formatearCaptionIA(propuesta) {
 }
 
 async function handleWebhook(req, res) {
-  // Responder inmediatamente HTTP 200 a Telegram para evitar timeouts
+  // Responder HTTP 200 de inmediato a Telegram
   res.status(200).json({ ok: true });
 
   const update = req.body;
@@ -34,10 +34,10 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        // 1. Manejo de entradas de texto libre (esperando FECHA o EDICIÓN)
+        // 1. Entradas de Texto Libre (esperando FECHA o EDICIÓN)
         if (text && !text.startsWith('/')) {
           
-          // A. Estado: PENDIENTE_FECHA
+          // Estado: PENDIENTE_FECHA
           const { data: pubPendienteFecha } = await supabase
             .from('publicaciones')
             .select('*')
@@ -52,7 +52,7 @@ async function handleWebhook(req, res) {
 
             let fechaProgramada;
             if (fechaPart && horaPart) {
-              const offsetHorario = '-03:00'; // Ajuste de zona horaria de Chile
+              const offsetHorario = '-03:00'; // Ajuste horario de Chile
               const isoLocalConOffset = `${fechaPart}T${horaPart}:00${offsetHorario}`;
               fechaProgramada = new Date(isoLocalConOffset);
             } else {
@@ -96,7 +96,7 @@ async function handleWebhook(req, res) {
             return;
           }
 
-          // B. Estado: PENDIENTE_EDITAR
+          // Estado: PENDIENTE_EDITAR
           const { data: pubPendienteEditar } = await supabase
             .from('publicaciones')
             .select('*')
@@ -141,7 +141,7 @@ async function handleWebhook(req, res) {
           }
         }
 
-        // 2. Manejo de subida de Multimedia (Post Normal, Reels, Stories o Carrusel)
+        // 2. Subida de Multimedia
         const mediaGroupId = update.message.media_group_id;
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
         const fotoArchivo = photo ? photo[photo.length - 1] : null;
@@ -150,37 +150,32 @@ async function handleWebhook(req, res) {
         if (archivoMultimedia) {
           logger.info('Archivo multimedia recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id, mediaGroupId });
 
-          // A. Manejo de ÁLBUM / CARRUSEL (media_group_id)
+          // A. ÁLBUM / CARRUSEL (Invocación atómica a Postgres)
           if (mediaGroupId) {
             const mediaUrlTemp = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
 
-            // Buscar si ya existe un borrador reciente para este álbum
-            const { data: pubExistente } = await supabase
-              .from('publicaciones')
-              .select('*')
-              .eq('media_group_id', mediaGroupId)
-              .order('creado_en', { ascending: false })
-              .limit(1)
-              .maybeSingle();
+            let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
+            const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
+            if (clienteDB) clienteId = clienteDB.id;
 
-            if (pubExistente) {
-              // Si el registro ya existe, adjuntar la nueva URL sin duplicar la IA ni los mensajes
-              const urlsActualizadas = Array.from(
-                new Set([...(pubExistente.media_urls || [pubExistente.media_url]), mediaUrlTemp])
-              );
+            // Invocar el procedimiento atómico
+            const { data: rpcRows, error: rpcError } = await supabase
+              .rpc('upsert_carousel_publicacion', {
+                p_media_group_id: mediaGroupId,
+                p_media_url: mediaUrlTemp,
+                p_cliente_id: clienteId,
+              });
 
-              await supabase
-                .from('publicaciones')
-                .update({ 
-                  media_urls: urlsActualizadas,
-                  tipo_publicacion: 'CAROUSEL'
-                })
-                .eq('id', pubExistente.id);
+            if (rpcError) throw rpcError;
 
-              return; // Salir silenciosamente para peticiones secundarias del álbum
+            const resultadoUpsert = Array.isArray(rpcRows) ? rpcRows[0] : rpcRows;
+
+            if (!resultadoUpsert.was_inserted) {
+              // Si fue una actualización (segunda foto en adelante), salir en silencio
+              return;
             }
 
-            // Primera imagen del álbum: notificar, consultar a la IA e insertar borrador
+            // Si fue la inserción inicial (primera foto), notificar y llamar a la IA
             await sendMessage(chatId, '📥 Álbum de carrusel detectado. Procesando imágenes y generando propuesta con la IA...');
 
             const tipoContenido = 'Carrusel para Instagram';
@@ -188,47 +183,37 @@ async function handleWebhook(req, res) {
             const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
             const captionTexto = formatearCaptionIA(propuesta);
 
-            let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
-            const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
-            if (clienteDB) clienteId = clienteDB.id;
-
-            const { data: nuevaPub, error: dbErr } = await supabase
+            const { error: captionUpdateError } = await supabase
               .from('publicaciones')
-              .insert({
-                cliente_id: clienteId,
-                caption: captionTexto,
-                media_url: mediaUrlTemp,
-                media_urls: [mediaUrlTemp],
-                media_group_id: mediaGroupId,
-                plataformas: ['instagram'],
-                tipo_publicacion: 'CAROUSEL',
-                estado: 'borrador',
-              })
-              .select('id')
-              .single();
+              .update({ caption: captionTexto })
+              .eq('id', resultadoUpsert.id);
 
-            if (dbErr) throw dbErr;
+            if (captionUpdateError) throw captionUpdateError;
 
-            // Pausa de consolidación para recolectar los webhooks paralelos de Telegram
-            await new Promise((resolve) => setTimeout(resolve, 4000));
+            // Pausa estratégica para esperar la subida paralela de los demás archivos del álbum
+            await new Promise((resolve) => setTimeout(resolve, 4500));
 
-            // Consultar las URLs consolidadas y enviar la propuesta interactiva
+            // Leer estado final con todas las URLs agregadas por el RPC
             const { data: pubFinal } = await supabase
               .from('publicaciones')
               .select('*')
-              .eq('id', nuevaPub.id)
+              .eq('id', resultadoUpsert.id)
               .single();
 
+            const urlsConsolidadas = Array.isArray(pubFinal.media_urls) && pubFinal.media_urls.length > 0
+              ? pubFinal.media_urls
+              : [pubFinal.media_url];
+
             await enviarPropuestaInteractivamente(
-              chatId, 
-              pubFinal.id, 
-              pubFinal.caption, 
-              pubFinal.media_url
+              chatId,
+              pubFinal.id,
+              pubFinal.caption,
+              urlsConsolidadas[0]
             );
             return;
           }
 
-          // B. ARCHIVO ÚNICO (Feed / Story / Reel)
+          // B. ARCHIVO ÚNICO (Post Normal / Story / Reel)
           await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando propuesta...');
 
           const mediaUrl = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
@@ -290,7 +275,6 @@ async function handleWebhook(req, res) {
           const tipoSeleccionado = parts[1]; // 'FEED' o 'STORY'
           const realPublicacionId = parts.slice(2).join('_');
 
-          // Preservar tipo CAROUSEL si existen múltiples elementos en media_urls
           const { data: pubActual } = await supabase
             .from('publicaciones')
             .select('media_urls')
