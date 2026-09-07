@@ -5,10 +5,14 @@ const logger = require('../config/logger');
 
 const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
-// Lista de modelos válidos en orden de preferencia (fallback)
-const MODELOS_DISPONIBLES = ['gemini-1.5-flash', 'gemini-1.5-pro'];
-const MAX_INTENTOS_POR_MODELO = 3;
+// Nombres oficiales soportados por el SDK @google/genai en v1beta
+const MODELOS_DISPONIBLES = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-1.5-flash'
+];
 
+const MAX_INTENTOS_POR_MODELO = 2;
 const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -18,7 +22,6 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
   let producto = input;
   let descripcion = descripcionCorta;
 
-  // Normalización del parámetro de entrada en caso de ser objeto o string
   if (typeof input === 'object' && input !== null) {
     producto = input.producto || input.nombreProducto || 'Producto';
     descripcion = input.descripcion || input.descripcionCorta || '';
@@ -47,14 +50,13 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
 
   let ultimoError = null;
 
-  // Iterar modelo por modelo (Fallback)
   for (const nombreModelo of MODELOS_DISPONIBLES) {
     for (let intento = 1; intento <= MAX_INTENTOS_POR_MODELO; intento++) {
       try {
         logger.info(`Intento ${intento} con modelo ${nombreModelo}`);
 
         const response = await ai.models.generateContent({
-          model: nombreModelo, // Se pasa una string individual
+          model: nombreModelo,
           contents: [{ role: 'user', parts: [{ text: promptText }] }],
           config: {
             responseMimeType: 'application/json',
@@ -62,13 +64,10 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
         });
 
         let rawText = response.text || '';
-        
-        // Limpieza defensiva de marcadores Markdown
         rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
         const parsed = JSON.parse(rawText);
 
-        // Normalización del campo hashtags
         if (typeof parsed.hashtags === 'string') {
           parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
         } else if (!Array.isArray(parsed.hashtags)) {
@@ -83,16 +82,18 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
         const errorMsg = error.message || '';
         logger.warn(`Error temporal en ${nombreModelo} (Intento ${intento}/${MAX_INTENTOS_POR_MODELO}): ${errorMsg}`);
 
-        // Si el error es por cuota superada (429 / RESOURCE_EXHAUSTED) o alta demanda (503)
+        // Si el modelo no existe (404), pasar de inmediato al siguiente modelo sin reintentar este
+        if (errorMsg.includes('404') || errorMsg.includes('NOT_FOUND')) {
+          break;
+        }
+
+        // Si es un error de cuota (429) o demanda (503), esperar antes de reintentar
         const esErrorCuotaOServidor = errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('503');
 
         if (intento < MAX_INTENTOS_POR_MODELO && esErrorCuotaOServidor) {
-          const tiempoPausa = intento * 3000; // 3s en el primer intento, 6s en el segundo
+          const tiempoPausa = intento * 3000;
           logger.info(`Pausando ${tiempoPausa}ms antes del siguiente intento...`);
           await esperar(tiempoPausa);
-        } else {
-          logger.error(`Fallaron los reintentos con ${nombreModelo}, pasando al modelo de respaldo...`);
-          break; // Sale del ciclo de reintentos para probar el siguiente modelo en MODELOS_DISPONIBLES
         }
       }
     }
