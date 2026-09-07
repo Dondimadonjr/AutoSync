@@ -49,6 +49,9 @@ async function answerCallbackQuery(callbackQueryId, text = null, showAlert = fal
 /**
  * Envía la lista de publicaciones programadas con botones para gestionar cada una
  */
+/**
+ * Envía la lista de publicaciones programadas con botones para gestionar cada una
+ */
 async function listarPublicacionesAgendadas(chatId, publicaciones) {
   if (!publicaciones || publicaciones.length === 0) {
     return sendMessage(chatId, '📅 *No tienes publicaciones programadas por el momento.*');
@@ -70,6 +73,8 @@ async function listarPublicacionesAgendadas(chatId, publicaciones) {
 
   return sendInlineKeyboard(chatId, texto, inlineKeyboard);
 }
+
+
 
 /**
  * Envía una propuesta interactiva con botones inline de Aprobación/Rechazo
@@ -110,4 +115,6 @@ module.exports = {
   sendMessage,
   answerCallbackQuery,
   enviarPropuestaInteractivamente,
+  sendInlineKeyboard,
+  listarPublicacionesAgendadas, 
 };

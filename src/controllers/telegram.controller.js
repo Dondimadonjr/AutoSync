@@ -280,7 +280,7 @@ async function handleWebhook(req, res) {
           await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
           return;
         }
-      } // Fin de if (update.message)
+      } 
 
       // ---------------------------------------------------------------------
       // B. BOTONES INTERACTIVOS (CALLBACK QUERY)
@@ -379,5 +379,7 @@ async function handleWebhook(req, res) {
     waitUntil(tareaWebhook);
   }
 }
+
+
 
 module.exports = { handleWebhook };
