@@ -47,6 +47,31 @@ async function answerCallbackQuery(callbackQueryId, text = null, showAlert = fal
 }
 
 /**
+ * Envía la lista de publicaciones programadas con botones para gestionar cada una
+ */
+async function listarPublicacionesAgendadas(chatId, publicaciones) {
+  if (!publicaciones || publicaciones.length === 0) {
+    return sendMessage(chatId, '📅 *No tienes publicaciones programadas por el momento.*');
+  }
+
+  let texto = '📅 *PUBLICACIONES PROGRAMADAS*\n\n';
+
+  publicaciones.forEach((pub, index) => {
+    const fecha = new Date(pub.programado_para).toLocaleString('es-CL', { timeZone: 'America/Santiago' });
+    const previewCaption = pub.caption ? pub.caption.substring(0, 60) + '...' : 'Sin texto';
+    
+    texto += `*${index + 1}. [${pub.tipo_publicacion}]* - ${fecha}\n`;
+    texto += `📝 _${previewCaption}_\n\n`;
+  });
+
+  const inlineKeyboard = publicaciones.map((pub, index) => [
+    { text: `❌ Cancelar #${index + 1}`, callback_data: `cancelaragendado_${pub.id}` }
+  ]);
+
+  return sendInlineKeyboard(chatId, texto, inlineKeyboard);
+}
+
+/**
  * Envía una propuesta interactiva con botones inline de Aprobación/Rechazo
  */
 async function enviarPropuestaInteractivamente(chatId, publicacionId, propuesta, mediaUrl) {

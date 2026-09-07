@@ -257,7 +257,25 @@ async function handleWebhook(req, res) {
           );
           return;
         }
-      } // Fin de if (update.message)
+      }
+
+      // 4. Comando /agendados
+        if (text && text.startsWith('/agendados')) {
+          const { data: agendados, error } = await supabase
+            .from('publicaciones')
+            .select('*')
+            .eq('estado', POST_STATUS.PROGRAMADO || 'PROGRAMADO')
+            .order('programado_para', { ascending: true });
+
+          if (error) {
+            logger.error('Error al obtener agendados:', error);
+            await sendMessage(chatId, '❌ Error al consultar las publicaciones agendadas.');
+            return;
+          }
+
+          await listarPublicacionesAgendadas(chatId, agendados);
+          return;
+        }
 
       // ---------------------------------------------------------------------
       // B. BOTONES INTERACTIVOS (CALLBACK QUERY)
@@ -270,6 +288,23 @@ async function handleWebhook(req, res) {
 
         const parts = data.split('_');
         const accion = parts[0];
+
+        if (accion === 'cancelaragendado') {
+          const pubId = parts.slice(1).join('_');
+
+          const { error: cancelError } = await supabase
+            .from('publicaciones')
+            .update({ estado: POST_STATUS.RECHAZADO || 'RECHAZADO' })
+            .eq('id', pubId);
+
+          if (cancelError) {
+            logger.error('Error cancelando publicación agendada:', cancelError);
+            await sendMessage(chatId, '❌ No se pudo cancelar la publicación.');
+            return;
+          }
+
+          await sendMessage(chatId, `🗑️ *Publicación programada cancelada con éxito.*`);
+        }
 
         if (accion === 'tipo') {
           const tipoSeleccionado = parts[1]; // 'FEED' o 'STORY'
