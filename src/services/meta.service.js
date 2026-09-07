@@ -225,20 +225,33 @@ async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo 
       return { postId: res.data.id };
     }
 
-    // Publicar photo story en Facebook Page
-    const res = await axios.post(`${GRAPH_API_URL}/${pageId}/photo_stories`, null, {
-      params: {
-        url: mediaUrl,
-        access_token: pageAccessToken,
-      },
-    });
-    logger.info('Foto Story publicada exitosamente en Facebook Page:', res.data);
-    return { postId: res.data.id };
+    // Intentar publicar photo story
+    try {
+      const res = await axios.post(`${GRAPH_API_URL}/${pageId}/photo_stories`, null, {
+        params: {
+          url: mediaUrl,
+          access_token: pageAccessToken,
+        },
+      });
+      logger.info('Foto Story publicada exitosamente en Facebook Page:', res.data);
+      return { postId: res.data.id };
+    } catch (storyErr) {
+      logger.warn('Error publicando en photo_stories API, aplicando fallback a foto directa en Facebook:', storyErr.message);
+      
+      // Fallback a foto pública de la Página
+      const resFallback = await axios.post(`${GRAPH_API_URL}/${pageId}/photos`, null, {
+        params: {
+          url: mediaUrl,
+          access_token: pageAccessToken,
+        },
+      });
+      return { postId: resFallback.data.id };
+    }
 
   } catch (error) {
     const errorMsg = error.response?.data?.error?.message || error.message;
-    logger.error('Error al publicar Story en Facebook Page:', { error: errorMsg });
-    throw new Error(`Facebook Story Error: ${errorMsg}`);
+    logger.error('Error al publicar en Facebook Page:', { error: errorMsg });
+    throw new Error(`Facebook API Error: ${errorMsg}`);
   }
 }
 
