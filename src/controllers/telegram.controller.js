@@ -93,10 +93,22 @@ async function handleWebhook(req, res) {
               fechaProgramada = new Date(textoLimpio);
             }
 
+            const ahora = new Date();
+
+            // 1. Validar formato de fecha
             if (isNaN(fechaProgramada.getTime())) {
               await sendMessage(
                 chatId,
-                '❌ *Formato de fecha inválido.* Por favor escribe la fecha usando el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-05 21:00`).'
+                '❌ *Formato de fecha inválido.* Por favor escribe la fecha usando el formato: `AAAA-MM-DD HH:MM` (ejemplo: `2026-09-10 18:30`).'
+              );
+              return;
+            }
+
+            // 2. Validar que la fecha no sea en el pasado
+            if (fechaProgramada <= ahora) {
+              await sendMessage(
+                chatId,
+                '⚠️ *La fecha ingresada ya pasó.* Por favor ingresa una fecha y hora futura (ejemplo: `2026-09-10 18:30`).'
               );
               return;
             }

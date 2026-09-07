@@ -158,9 +158,60 @@ async function publicarCarruselInstagram(igAccountId, accessToken, mediaUrls, ca
   return { postId: publishRes.data.id };
 }
 
+/**
+ * Publica una foto, video o texto en una Página de Facebook
+ */
+async function publicarEnFacebook(pageId, pageAccessToken, mediaUrl, caption) {
+  try {
+    const isVideo = typeof mediaUrl === 'string' && mediaUrl.toLowerCase().includes('.mp4');
+    
+    if (isVideo) {
+      // Publicar video en Facebook Page
+      const res = await axios.post(`${GRAPH_API_URL}/${pageId}/videos`, null, {
+        params: {
+          file_url: mediaUrl,
+          description: caption,
+          access_token: pageAccessToken,
+        },
+      });
+      logger.info('Video publicado exitosamente en Facebook Page:', res.data);
+      return { postId: res.data.id };
+    }
+
+    if (mediaUrl) {
+      // Publicar foto única en Facebook Page
+      const res = await axios.post(`${GRAPH_API_URL}/${pageId}/photos`, null, {
+        params: {
+          url: mediaUrl,
+          message: caption,
+          access_token: pageAccessToken,
+        },
+      });
+      logger.info('Foto publicada exitosamente en Facebook Page:', res.data);
+      return { postId: res.data.id };
+    }
+
+    // Publicar solo texto
+    const res = await axios.post(`${GRAPH_API_URL}/${pageId}/feed`, null, {
+      params: {
+        message: caption,
+        access_token: pageAccessToken,
+      },
+    });
+    logger.info('Post de texto publicado exitosamente en Facebook Page:', res.data);
+    return { postId: res.data.id };
+
+  } catch (error) {
+    const errorMsg = error.response?.data?.error?.message || error.message;
+    logger.error('Error al publicar en Facebook Page:', { error: errorMsg });
+    throw new Error(`Facebook API Error: ${errorMsg}`);
+  }
+}
+
 module.exports = {
   publicarEnInstagram,
   publicarReelInstagram,
   publicarStoryInstagram,
   publicarCarruselInstagram,
+  publicarEnFacebook,
 };
