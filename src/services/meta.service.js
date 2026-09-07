@@ -227,6 +227,9 @@ async function publicarEnFacebook(pageId, pageAccessToken, mediaUrl, caption) {
 /**
  * Publica una Historia (Story) nativa en una Página de Facebook
  */
+/**
+ * Publica una Historia (Story) nativa en una Página de Facebook
+ */
 async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo = false) {
   try {
     if (isVideo) {
@@ -241,23 +244,36 @@ async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo 
       return { postId: res.data.id };
     }
 
-    // Publicar Photo Story nativa en la Página de Facebook
-    logger.info('Publicando Foto Story en Facebook Page...', { pageId });
-    const res = await axios.post(`${GRAPH_API_URL}/${pageId}/photo_stories`, null, {
+    // PASO 1: Subir la foto como NO PUBLICADA para obtener el photo_id
+    logger.info('Subiendo imagen temporal no publicada a Facebook Page...', { pageId });
+    const photoUploadRes = await axios.post(`${GRAPH_API_URL}/${pageId}/photos`, null, {
       params: {
         url: mediaUrl,
+        published: false, // Evita que aparezca en el feed público
         access_token: pageAccessToken,
       },
     });
 
-    logger.info('Foto Story publicada exitosamente en Facebook Page:', res.data);
-    return { postId: res.data.id };
+    const photoId = photoUploadRes.data.id;
+    logger.info('Foto no publicada subida con éxito, photo_id:', { photoId });
+
+    // PASO 2: Publicar el photo_id en las Historias de la Página
+    logger.info('Publicando Photo Story nativa en Facebook Page...', { pageId, photoId });
+    const storyRes = await axios.post(`${GRAPH_API_URL}/${pageId}/photo_stories`, null, {
+      params: {
+        photo_id: photoId,
+        access_token: pageAccessToken,
+      },
+    });
+
+    logger.info('Foto Story publicada exitosamente en Facebook Page:', storyRes.data);
+    return { postId: storyRes.data.id };
 
   } catch (error) {
     const errorMsg = error.response?.data?.error?.message || error.message;
     logger.error('Error al publicar Story en Facebook Page:', { error: errorMsg });
     
-    // Fallback defensivo: Si Meta rechaza la story, la sube al feed como foto normal
+    // Fallback defensivo: Si falla photo_stories, la sube al feed como foto normal
     logger.warn('Reintentando publicación en Facebook como foto normal...');
     const resFallback = await axios.post(`${GRAPH_API_URL}/${pageId}/photos`, null, {
       params: {
