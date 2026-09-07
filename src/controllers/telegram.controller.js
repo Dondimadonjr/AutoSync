@@ -1,6 +1,11 @@
 const { waitUntil } = require('@vercel/functions');
 const logger = require('../config/logger');
-const { sendMessage, answerCallbackQuery, enviarPropuestaInteractivamente } = require('../services/telegram.service');
+const { 
+  sendMessage, 
+  answerCallbackQuery, 
+  enviarPropuestaInteractivamente, 
+  listarPublicacionesAgendadas 
+} = require('../services/telegram.service');
 const { procesarAprobacionAsync, procesarRechazo } = require('../services/publisher.service');
 const { subirVideoDesdeTelegram } = require('../services/storage.service');
 const { generarPropuestaPublicacion } = require('../services/ai.service');
@@ -34,7 +39,36 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        // 1. Entradas de Texto Libre (esperando FECHA o EDICIÓN)
+        // 1. Comando /start
+        if (text && text.startsWith('/start')) {
+          await sendMessage(
+            chatId,
+            `¡Hola, *${from?.first_name || 'Usuario'}*! 👋\n\n` +
+              `Bienvenido a *AutoSync* 🤖.\n\n` +
+              `Envía cualquier video o foto con una breve leyenda para generar y publicar tu post.`
+          );
+          return;
+        }
+
+        // 2. Comando /agendados
+        if (text && text.startsWith('/agendados')) {
+          const { data: agendados, error } = await supabase
+            .from('publicaciones')
+            .select('*')
+            .eq('estado', POST_STATUS.PROGRAMADO || 'PROGRAMADO')
+            .order('programado_para', { ascending: true });
+
+          if (error) {
+            logger.error('Error al obtener agendados:', error);
+            await sendMessage(chatId, '❌ Error al consultar las publicaciones agendadas.');
+            return;
+          }
+
+          await listarPublicacionesAgendadas(chatId, agendados);
+          return;
+        }
+
+        // 3. Entradas de Texto Libre (esperando FECHA o EDICIÓN)
         if (text && !text.startsWith('/')) {
           
           // Estado: PENDIENTE_FECHA
@@ -141,7 +175,7 @@ async function handleWebhook(req, res) {
           }
         }
 
-        // 2. Subida de Multimedia
+        // 4. Subida de Multimedia
         const mediaGroupId = update.message.media_group_id;
         const videoArchivo = video || (document && document.mime_type?.includes('video') ? document : null);
         const fotoArchivo = photo ? photo[photo.length - 1] : null;
@@ -246,36 +280,7 @@ async function handleWebhook(req, res) {
           await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
           return;
         }
-
-        // 3. Comando /start
-        if (text && text.startsWith('/start')) {
-          await sendMessage(
-            chatId,
-            `¡Hola, *${from?.first_name || 'Usuario'}*! 👋\n\n` +
-              `Bienvenido a *AutoSync* 🤖.\n\n` +
-              `Envía cualquier video o foto con una breve leyenda para generar y publicar tu post.`
-          );
-          return;
-        }
-      }
-
-      // 4. Comando /agendados
-        if (text && text.startsWith('/agendados')) {
-          const { data: agendados, error } = await supabase
-            .from('publicaciones')
-            .select('*')
-            .eq('estado', POST_STATUS.PROGRAMADO || 'PROGRAMADO')
-            .order('programado_para', { ascending: true });
-
-          if (error) {
-            logger.error('Error al obtener agendados:', error);
-            await sendMessage(chatId, '❌ Error al consultar las publicaciones agendadas.');
-            return;
-          }
-
-          await listarPublicacionesAgendadas(chatId, agendados);
-          return;
-        }
+      } // Fin de if (update.message)
 
       // ---------------------------------------------------------------------
       // B. BOTONES INTERACTIVOS (CALLBACK QUERY)
@@ -304,9 +309,8 @@ async function handleWebhook(req, res) {
           }
 
           await sendMessage(chatId, `🗑️ *Publicación programada cancelada con éxito.*`);
-        }
 
-        if (accion === 'tipo') {
+        } else if (accion === 'tipo') {
           const tipoSeleccionado = parts[1]; // 'FEED' o 'STORY'
           const realPublicacionId = parts.slice(2).join('_');
 
