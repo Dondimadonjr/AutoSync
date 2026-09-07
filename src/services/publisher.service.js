@@ -4,7 +4,8 @@ const { POST_STATUS } = require('../constants');
 const { 
   publicarEnInstagram, 
   publicarStoryInstagram,
-  publicarCarruselInstagram 
+  publicarCarruselInstagram,
+  publicarReelInstagram
 } = require('./meta.service');
 const { sendMessage } = require('./telegram.service');
 
@@ -74,13 +75,21 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       ? publicacion.media_urls
       : (publicacion.media_url ? [publicacion.media_url] : []);
 
+    const { 
+  publicarEnInstagram, 
+  publicarStoryInstagram,
+  publicarCarruselInstagram,
+  publicarReelInstagram
+} = require('./meta.service');
+
+// En el Paso 3 dentro de procesarAprobacionAsync:
+
     let resultado;
     let formatoTexto = 'Feed';
-    const esVideo = publicacion.media_url?.includes('.mp4');
+    const esVideo = publicacion.media_url?.toLowerCase().includes('.mp4');
 
-    // Forzar Carrusel si hay múltiples archivos o si la marca explícita es CAROUSEL
+    // Evaluaciones por formato
     if (listaUrls.length > 1 || publicacion.tipo_publicacion === 'CAROUSEL') {
-      logger.info(`Ejecutando publicación de Carrusel con ${listaUrls.length} archivo(s).`, { publicacionId });
       resultado = await publicarCarruselInstagram(
         instagramAccountId,
         accessToken,
@@ -98,7 +107,18 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       );
       formatoTexto = 'Historia / Story';
 
+    } else if (esVideo) {
+      // Si es un archivo único de vídeo (.mp4), se publica como REEL
+      resultado = await publicarReelInstagram(
+        instagramAccountId,
+        accessToken,
+        publicacion.media_url,
+        publicacion.caption
+      );
+      formatoTexto = 'Reel';
+
     } else {
+      // Imagen estática para Feed
       resultado = await publicarEnInstagram(
         instagramAccountId,
         accessToken,

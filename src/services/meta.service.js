@@ -6,7 +6,7 @@ const GRAPH_API_URL = 'https://graph.facebook.com/v19.0';
 /**
  * Espera activamente a que Meta termine de procesar un contenedor multimedia (status_code === 'FINISHED')
  */
-async function esperarProcesamientoMeta(containerId, accessToken, maxIntentos = 10) {
+async function esperarProcesamientoMeta(containerId, accessToken, maxIntentos = 12) {
   const checkUrl = `${GRAPH_API_URL}/${containerId}`;
   
   for (let i = 0; i < maxIntentos; i++) {
@@ -18,28 +18,28 @@ async function esperarProcesamientoMeta(containerId, accessToken, maxIntentos = 
     });
 
     const statusCode = res.data?.status_code;
-    logger.info(`Estado del contenedor Meta (${containerId}): ${statusCode}`);
+    logger.info(`Estado del contenedor Meta (${containerId}): ${statusCode} (Intento ${i + 1}/${maxIntentos})`);
 
     if (statusCode === 'FINISHED') {
       return true;
     }
 
-    if (statusCode === 'ERROR') {
-      throw new Error(`El procesamiento del archivo multimedia falló en Meta: ${res.data?.status || 'Error desconocido'}`);
+    if (statusCode === 'ERROR' || statusCode === 'EXPIRED') {
+      throw new Error(`El procesamiento del archivo multimedia falló en Meta: ${res.data?.status || statusCode}`);
     }
 
-    // Esperar 3 segundos antes de reintentar
-    await new Promise((resolve) => setTimeout(resolve, 3000));
+    // Esperar 3.5 segundos antes de reintentar
+    await new Promise((resolve) => setTimeout(resolve, 3500));
   }
 
   throw new Error('Tiempo de espera agotado: Meta tardó demasiado en procesar el archivo multimedia.');
 }
 
 /**
- * Publica una foto o video estándar (Reel) en el Feed de Instagram
+ * Publica una foto o video (Reel) en el Feed de Instagram
  */
 async function publicarEnInstagram(igAccountId, accessToken, mediaUrl, caption) {
-  const isVideo = mediaUrl.includes('.mp4');
+  const isVideo = typeof mediaUrl === 'string' && mediaUrl.toLowerCase().includes('.mp4');
   const containerUrl = `${GRAPH_API_URL}/${igAccountId}/media`;
   
   const containerParams = {
@@ -49,10 +49,11 @@ async function publicarEnInstagram(igAccountId, accessToken, mediaUrl, caption) 
     ...(isVideo && { media_type: 'REELS' }),
   };
 
+  logger.info(`Creando contenedor en Meta (${isVideo ? 'REEL' : 'IMAGE'})...`, { igAccountId });
   const containerRes = await axios.post(containerUrl, null, { params: containerParams });
   const creationId = containerRes.data.id;
 
-  // Esperar a que el contenedor sea procesado por Meta
+  // Esperar a que el contenedor esté procesado
   await esperarProcesamientoMeta(creationId, accessToken);
 
   const publishUrl = `${GRAPH_API_URL}/${igAccountId}/media_publish`;
@@ -61,6 +62,13 @@ async function publicarEnInstagram(igAccountId, accessToken, mediaUrl, caption) 
   });
 
   return { postId: publishRes.data.id };
+}
+
+/**
+ * Publica explícitamente un Instagram Reel
+ */
+async function publicarReelInstagram(igAccountId, accessToken, videoUrl, caption) {
+  return publicarEnInstagram(igAccountId, accessToken, videoUrl, caption);
 }
 
 /**
@@ -74,6 +82,7 @@ async function publicarStoryInstagram(igAccountId, accessToken, mediaUrl, isVide
     [isVideo ? 'video_url' : 'image_url']: mediaUrl,
   };
 
+  logger.info('Creando contenedor de Story en Meta...', { igAccountId });
   const containerRes = await axios.post(containerUrl, null, { params: containerParams });
   const creationId = containerRes.data.id;
 
@@ -96,7 +105,10 @@ async function publicarCarruselInstagram(igAccountId, accessToken, mediaUrls, ca
 
   // 1. Crear contenedores para cada ítem del carrusel
   for (const media of mediaUrls) {
-    const isVideo = typeof media === 'object' ? media.isVideo : media.endsWith('.mp4');
+    const isVideo = typeof media === 'object' 
+      ? Boolean(media.isVideo) 
+      : String(media).toLowerCase().includes('.mp4');
+      
     const url = typeof media === 'object' ? media.url : media;
 
     const containerParams = {
@@ -148,6 +160,7 @@ async function publicarCarruselInstagram(igAccountId, accessToken, mediaUrls, ca
 
 module.exports = {
   publicarEnInstagram,
+  publicarReelInstagram,
   publicarStoryInstagram,
   publicarCarruselInstagram,
 };
