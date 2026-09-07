@@ -6,7 +6,7 @@ const logger = require('../config/logger');
 const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
 // Se actualiza el nombre del modelo a la versión estable de producción
-const MODELO_OFICIAL = 'gemini-3.6-flash';
+const MODELO_OFICIAL = ['gemini-3.6-flash', 'gemini-1.5-flash'];
 const MAX_INTENTOS = 3;
 
 const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
