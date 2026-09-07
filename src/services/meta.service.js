@@ -225,47 +225,47 @@ async function publicarEnFacebook(pageId, pageAccessToken, mediaUrl, caption) {
 }
 
 /**
- * Publica contenido en Facebook cuando en Telegram se marca como formato Story
+ * Publica una Historia (Story) nativa en una Página de Facebook
  */
 async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo = false) {
   try {
     if (isVideo) {
-      try {
-        const res = await axios.post(`${GRAPH_API_URL}/${pageId}/video_stories`, null, {
-          params: {
-            file_url: mediaUrl,
-            access_token: pageAccessToken,
-          },
-        });
-        logger.info('Video Story publicada exitosamente en Facebook Page:', res.data);
-        return { postId: res.data.id };
-      } catch (videoStoryErr) {
-        logger.warn('Error en video_stories API, reintentando como video público de Facebook Page:', videoStoryErr.message);
-        const resVideo = await axios.post(`${GRAPH_API_URL}/${pageId}/videos`, null, {
-          params: {
-            file_url: mediaUrl,
-            access_token: pageAccessToken,
-          },
-        });
-        return { postId: resVideo.data.id };
-      }
+      logger.info('Publicando Video Story en Facebook Page...', { pageId });
+      const res = await axios.post(`${GRAPH_API_URL}/${pageId}/video_stories`, null, {
+        params: {
+          file_url: mediaUrl,
+          access_token: pageAccessToken,
+        },
+      });
+      logger.info('Video Story publicada exitosamente en Facebook Page:', res.data);
+      return { postId: res.data.id };
     }
 
-    logger.info('Publicando imagen en Facebook Page como foto...', { pageId });
-    const resPhoto = await axios.post(`${GRAPH_API_URL}/${pageId}/photos`, null, {
+    // Publicar Photo Story nativa en la Página de Facebook
+    logger.info('Publicando Foto Story en Facebook Page...', { pageId });
+    const res = await axios.post(`${GRAPH_API_URL}/${pageId}/photo_stories`, null, {
       params: {
         url: mediaUrl,
         access_token: pageAccessToken,
       },
     });
 
-    logger.info('Foto publicada exitosamente en Facebook Page:', resPhoto.data);
-    return { postId: resPhoto.data.id };
+    logger.info('Foto Story publicada exitosamente en Facebook Page:', res.data);
+    return { postId: res.data.id };
 
   } catch (error) {
     const errorMsg = error.response?.data?.error?.message || error.message;
-    logger.error('Error al publicar en Facebook Page:', { error: errorMsg });
-    throw new Error(`Facebook API Error: ${errorMsg}`);
+    logger.error('Error al publicar Story en Facebook Page:', { error: errorMsg });
+    
+    // Fallback defensivo: Si Meta rechaza la story, la sube al feed como foto normal
+    logger.warn('Reintentando publicación en Facebook como foto normal...');
+    const resFallback = await axios.post(`${GRAPH_API_URL}/${pageId}/photos`, null, {
+      params: {
+        url: mediaUrl,
+        access_token: pageAccessToken,
+      },
+    });
+    return { postId: resFallback.data.id };
   }
 }
 
