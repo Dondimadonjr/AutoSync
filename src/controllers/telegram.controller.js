@@ -19,6 +19,7 @@ function formatearCaptionIA(propuesta) {
 }
 
 async function handleWebhook(req, res) {
+  // Responder inmediatamente 200 a Telegram
   res.status(200).json({ ok: true });
 
   const update = req.body;
@@ -33,7 +34,7 @@ async function handleWebhook(req, res) {
         const { text, chat, from, video, document, photo, caption } = update.message;
         const chatId = chat.id;
 
-        // 1. Manejo de entradas de texto libre (esperando FECHA o NUEVO TEXTO PARA EDITAR)
+        // 1. Manejo de entradas de texto libre (esperando FECHA o NUEVO TEXTO)
         if (text && !text.startsWith('/')) {
           
           // A. Si la publicación está esperando FECHA DE PROGRAMACIÓN
@@ -95,7 +96,7 @@ async function handleWebhook(req, res) {
             return;
           }
 
-          // B. Si la publicación está esperando EDICIÓN -> Pasa nuevamente por la IA
+          // B. Si la publicación está esperando EDICIÓN
           const { data: pubPendienteEditar } = await supabase
             .from('publicaciones')
             .select('*')
@@ -150,11 +151,10 @@ async function handleWebhook(req, res) {
           logger.info('Archivo multimedia recibido en Telegram', { chatId, fileId: archivoMultimedia.file_id, mediaGroupId });
 
           // A. Si es un ÁLBUM / CARRUSEL (múltiples imágenes/videos juntos)
-          // A. Si es un ÁLBUM / CARRUSEL (múltiples imágenes/videos juntos)
           if (mediaGroupId) {
             const mediaUrlTemp = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
 
-            // Buscar si ya existe un borrador para este grupo de medios
+            // Intentar buscar si ya existe un borrador previo para este media_group_id
             const { data: pubExistente } = await supabase
               .from('publicaciones')
               .select('*')
@@ -162,60 +162,70 @@ async function handleWebhook(req, res) {
               .maybeSingle();
 
             if (pubExistente) {
-              // Agregar la URL al arreglo sin regenerar propuesta ni enviar mensajes duplicados
-              const urlsActualizadas = [...(pubExistente.media_urls || [pubExistente.media_url]), mediaUrlTemp];
-              
-              const { data: pubActualizada } = await supabase
+              // Si ya existe la primera foto, anexar esta nueva URL al array media_urls
+              const urlsActualizadas = Array.from(
+                new Set([...(pubExistente.media_urls || [pubExistente.media_url]), mediaUrlTemp])
+              );
+
+              await supabase
                 .from('publicaciones')
                 .update({ 
                   media_urls: urlsActualizadas,
                   tipo_publicacion: 'CAROUSEL'
                 })
-                .eq('id', pubExistente.id)
-                .select('*')
-                .single();
+                .eq('id', pubExistente.id);
 
-              // Si es el segundo archivo recibido, enviar directamente la botonera final
-              if (urlsActualizadas.length === 2) {
-                await enviarPropuestaInteractivamente(
-                  chatId, 
-                  pubActualizada.id, 
-                  pubActualizada.caption, 
-                  pubActualizada.media_url
-                );
-              }
-              return;
-            } else {
-              // Crear el borrador del carrusel (solo 1 vez)
-              await sendMessage(chatId, '📥 Álbum de carrusel detectado. Procesando imágenes y generando propuesta con la IA...');
-
-              const tipoContenido = 'Carrusel para Instagram';
-              const descripcion = caption || 'Publicación en carrusel con múltiples imágenes/videos';
-              const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
-              const captionTexto = formatearCaptionIA(propuesta);
-
-              let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
-              const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
-              if (clienteDB) clienteId = clienteDB.id;
-
-              const { data: nuevaPub, error: dbErr } = await supabase
-                .from('publicaciones')
-                .insert({
-                  cliente_id: clienteId,
-                  caption: captionTexto,
-                  media_url: mediaUrlTemp,
-                  media_urls: [mediaUrlTemp],
-                  media_group_id: mediaGroupId,
-                  plataformas: ['instagram'],
-                  tipo_publicacion: 'CAROUSEL',
-                  estado: 'borrador',
-                })
-                .select('id')
-                .single();
-
-              if (dbErr) throw dbErr;
-              return;
+              return; // Salir sin enviar mensajes duplicados
             }
+
+            // Si es la PRIMERA imagen que entra del álbum:
+            await sendMessage(chatId, '📥 Álbum de carrusel detectado. Procesando imágenes y generando propuesta con la IA...');
+
+            const tipoContenido = 'Carrusel para Instagram';
+            const descripcion = caption || 'Publicación en carrusel con múltiples imágenes/videos';
+            const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
+            const captionTexto = formatearCaptionIA(propuesta);
+
+            let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
+            const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
+            if (clienteDB) clienteId = clienteDB.id;
+
+            // Insertar el borrador base
+            const { data: nuevaPub, error: dbErr } = await supabase
+              .from('publicaciones')
+              .insert({
+                cliente_id: clienteId,
+                caption: captionTexto,
+                media_url: mediaUrlTemp,
+                media_urls: [mediaUrlTemp],
+                media_group_id: mediaGroupId,
+                plataformas: ['instagram'],
+                tipo_publicacion: 'CAROUSEL',
+                estado: 'borrador',
+              })
+              .select('id')
+              .single();
+
+            if (dbErr) throw dbErr;
+
+            // Pausa estratégica de 3.5s para consolidar todas las fotos enviadas por los webhooks paralelos
+            await new Promise((resolve) => setTimeout(resolve, 3500));
+
+            // Obtener el registro actualizado con el array completo de URLs
+            const { data: pubFinal } = await supabase
+              .from('publicaciones')
+              .select('*')
+              .eq('id', nuevaPub.id)
+              .single();
+
+            // Enviar la propuesta interactiva final con los botones
+            await enviarPropuestaInteractivamente(
+              chatId, 
+              pubFinal.id, 
+              pubFinal.caption, 
+              pubFinal.media_url
+            );
+            return;
           }
 
           // B. Si es un ARCHIVO ÚNICO (Post Normal / Story)
