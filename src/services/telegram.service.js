@@ -26,6 +26,18 @@ async function sendMessage(chatId, text, options = {}) {
 }
 
 /**
+ * Envía un mensaje con una botonera inline personalizada
+ */
+async function sendInlineKeyboard(chatId, text, inlineKeyboard, parseMode = 'Markdown') {
+  return sendMessage(chatId, text, {
+    parse_mode: parseMode,
+    reply_markup: {
+      inline_keyboard: inlineKeyboard,
+    },
+  });
+}
+
+/**
  * Responde a una Callback Query para detener el spinner en la app de Telegram
  */
 async function answerCallbackQuery(callbackQueryId, text = null, showAlert = false) {
@@ -41,14 +53,10 @@ async function answerCallbackQuery(callbackQueryId, text = null, showAlert = fal
       callbackQueryId,
       error: error.response?.data || error.message,
     });
-    // No lanzar excepción aquí para no detener el flujo principal
     return null;
   }
 }
 
-/**
- * Envía la lista de publicaciones programadas con botones para gestionar cada una
- */
 /**
  * Envía la lista de publicaciones programadas con botones para gestionar cada una
  */
@@ -74,8 +82,6 @@ async function listarPublicacionesAgendadas(chatId, publicaciones) {
   return sendInlineKeyboard(chatId, texto, inlineKeyboard);
 }
 
-
-
 /**
  * Envía una propuesta interactiva con botones inline de Aprobación/Rechazo
  */
@@ -88,33 +94,28 @@ async function enviarPropuestaInteractivamente(chatId, publicacionId, propuesta,
     `📝 *Caption Sugerido:*\n${captionTexto}\n\n` +
     `📎 *Media:* [Ver archivo](${mediaUrl})`;
 
-  const keyboard = {
-    inline_keyboard: [
-      [
-        { text: '📸 Post Normal', callback_data: `tipo_FEED_${publicacionId}` },
-        { text: '📱 Historia / Story', callback_data: `tipo_STORY_${publicacionId}` },
-      ],
-      [
-        { text: '🚀 Publicar Ahora', callback_data: `aprobar_${publicacionId}` },
-        { text: '📅 Programar', callback_data: `agendar_${publicacionId}` },
-      ],
-      [
-        { text: '✏️ Editar Caption', callback_data: `editar_${publicacionId}` },
-        { text: '❌ Rechazar', callback_data: `rechazar_${publicacionId}` },
-      ],
+  const inlineKeyboard = [
+    [
+      { text: '📸 Post Normal', callback_data: `tipo_FEED_${publicacionId}` },
+      { text: '📱 Historia / Story', callback_data: `tipo_STORY_${publicacionId}` },
     ],
-  };
+    [
+      { text: '🚀 Publicar Ahora', callback_data: `aprobar_${publicacionId}` },
+      { text: '📅 Programar', callback_data: `agendar_${publicacionId}` },
+    ],
+    [
+      { text: '✏️ Editar Caption', callback_data: `editar_${publicacionId}` },
+      { text: '❌ Rechazar', callback_data: `rechazar_${publicacionId}` },
+    ],
+  ];
 
-  await sendMessage(chatId, mensaje, {
-    parse_mode: 'Markdown',
-    reply_markup: keyboard,
-  });
+  return sendInlineKeyboard(chatId, mensaje, inlineKeyboard);
 }
 
 module.exports = {
   sendMessage,
+  sendInlineKeyboard,
   answerCallbackQuery,
   enviarPropuestaInteractivamente,
-  sendInlineKeyboard,
-  listarPublicacionesAgendadas, 
+  listarPublicacionesAgendadas,
 };
