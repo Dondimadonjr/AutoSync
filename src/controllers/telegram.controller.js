@@ -290,9 +290,19 @@ async function handleWebhook(req, res) {
           const tipoSeleccionado = parts[1]; // 'FEED' o 'STORY'
           const realPublicacionId = parts.slice(2).join('_');
 
+          // Consultar si es una publicación con múltiples imágenes
+          const { data: pubActual } = await supabase
+            .from('publicaciones')
+            .select('media_urls')
+            .eq('id', realPublicacionId)
+            .single();
+
+          const esCarrusel = pubActual?.media_urls && pubActual.media_urls.length > 1;
+          const tipoFinal = (tipoSeleccionado === 'FEED' && esCarrusel) ? 'CAROUSEL' : tipoSeleccionado;
+
           const { error: updateTypeError } = await supabase
             .from('publicaciones')
-            .update({ tipo_publicacion: tipoSeleccionado })
+            .update({ tipo_publicacion: tipoFinal })
             .eq('id', realPublicacionId);
 
           if (updateTypeError) {
@@ -301,7 +311,10 @@ async function handleWebhook(req, res) {
             return;
           }
 
-          const mensajeTipo = tipoSeleccionado === 'STORY' ? '📱 Historia / Story' : '📸 Post Normal (Feed)';
+          let mensajeTipo = '📸 Post Normal (Feed)';
+          if (tipoFinal === 'STORY') mensajeTipo = '📱 Historia / Story';
+          if (tipoFinal === 'CAROUSEL') mensajeTipo = '🎠 Carrusel (Múltiples fotos)';
+
           await sendMessage(chatId, `✅ Formato actualizado a: *${mensajeTipo}*`);
 
         } else {

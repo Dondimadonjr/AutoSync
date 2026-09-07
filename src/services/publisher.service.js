@@ -71,10 +71,13 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
     }
 
     // 3. Ejecutar publicación según el formato (CAROUSEL, STORY o FEED/REELS)
+    // 3. Ejecutar publicación según el formato (CAROUSEL, STORY o FEED/REELS)
     let resultado;
     const esVideo = publicacion.media_url?.includes('.mp4');
+    const tieneMultiplesArchivos = Array.isArray(publicacion.media_urls) && publicacion.media_urls.length > 1;
 
-    if (publicacion.tipo_publicacion === 'CAROUSEL' && Array.isArray(publicacion.media_urls) && publicacion.media_urls.length > 1) {
+    if (publicacion.tipo_publicacion === 'CAROUSEL' || tieneMultiplesArchivos) {
+      logger.info(`Iniciando publicación de Carrusel con ${publicacion.media_urls.length} elementos.`);
       resultado = await publicarCarruselInstagram(
         instagramAccountId,
         accessToken,
