@@ -5,9 +5,9 @@ const logger = require('../config/logger');
 
 const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
-// Se actualiza el nombre del modelo a la versión estable de producción
-const MODELO_OFICIAL = ['gemini-3.6-flash', 'gemini-1.5-flash'];
-const MAX_INTENTOS = 3;
+// Lista de modelos válidos en orden de preferencia (fallback)
+const MODELOS_DISPONIBLES = ['gemini-1.5-flash', 'gemini-1.5-pro'];
+const MAX_INTENTOS_POR_MODELO = 3;
 
 const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -47,48 +47,59 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
 
   let ultimoError = null;
 
-  for (let intento = 1; intento <= MAX_INTENTOS; intento++) {
-    try {
-      logger.info(`Intento ${intento} con modelo ${MODELO_OFICIAL}`);
+  // Iterar modelo por modelo (Fallback)
+  for (const nombreModelo of MODELOS_DISPONIBLES) {
+    for (let intento = 1; intento <= MAX_INTENTOS_POR_MODELO; intento++) {
+      try {
+        logger.info(`Intento ${intento} con modelo ${nombreModelo}`);
 
-      const response = await ai.models.generateContent({
-        model: MODELO_OFICIAL,
-        contents: [{ role: 'user', parts: [{ text: promptText }] }],
-        config: {
-          responseMimeType: 'application/json',
-        },
-      });
+        const response = await ai.models.generateContent({
+          model: nombreModelo, // Se pasa una string individual
+          contents: [{ role: 'user', parts: [{ text: promptText }] }],
+          config: {
+            responseMimeType: 'application/json',
+          },
+        });
 
-      let rawText = response.text || '';
-      
-      // Limpieza defensiva de marcadores Markdown por si la IA entrega formato envuelto
-      rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+        let rawText = response.text || '';
+        
+        // Limpieza defensiva de marcadores Markdown
+        rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
-      const parsed = JSON.parse(rawText);
+        const parsed = JSON.parse(rawText);
 
-      // Normalización del campo hashtags
-      if (typeof parsed.hashtags === 'string') {
-        parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
-      } else if (!Array.isArray(parsed.hashtags)) {
-        parsed.hashtags = [];
-      }
+        // Normalización del campo hashtags
+        if (typeof parsed.hashtags === 'string') {
+          parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
+        } else if (!Array.isArray(parsed.hashtags)) {
+          parsed.hashtags = [];
+        }
 
-      logger.info(`Propuesta generada exitosamente en el intento ${intento} con ${MODELO_OFICIAL}`);
-      return parsed;
+        logger.info(`Propuesta generada exitosamente en el intento ${intento} con ${nombreModelo}`);
+        return parsed;
 
-    } catch (error) {
-      ultimoError = error;
-      logger.warn(`Error temporal en ${MODELO_OFICIAL} (Intento ${intento}/${MAX_INTENTOS}): ${error.message}`);
+      } catch (error) {
+        ultimoError = error;
+        const errorMsg = error.message || '';
+        logger.warn(`Error temporal en ${nombreModelo} (Intento ${intento}/${MAX_INTENTOS_POR_MODELO}): ${errorMsg}`);
 
-      if (intento < MAX_INTENTOS) {
-        logger.info(`Pausando 1000ms antes del siguiente intento...`);
-        await esperar(1000);
+        // Si el error es por cuota superada (429 / RESOURCE_EXHAUSTED) o alta demanda (503)
+        const esErrorCuotaOServidor = errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('503');
+
+        if (intento < MAX_INTENTOS_POR_MODELO && esErrorCuotaOServidor) {
+          const tiempoPausa = intento * 3000; // 3s en el primer intento, 6s en el segundo
+          logger.info(`Pausando ${tiempoPausa}ms antes del siguiente intento...`);
+          await esperar(tiempoPausa);
+        } else {
+          logger.error(`Fallaron los reintentos con ${nombreModelo}, pasando al modelo de respaldo...`);
+          break; // Sale del ciclo de reintentos para probar el siguiente modelo en MODELOS_DISPONIBLES
+        }
       }
     }
   }
 
-  logger.error(`Todos los reintentos fallaron con ${MODELO_OFICIAL}:`, { error: ultimoError?.message });
-  throw new Error(`Servidores de IA saturados temporalmente tras ${MAX_INTENTOS} intentos. Por favor, vuelve a enviar la imagen en unos segundos.`);
+  logger.error('Todos los modelos y reintentos fallaron:', { error: ultimoError?.message });
+  throw new Error('Servidores de IA saturados temporalmente o límite de cuota alcanzado. Por favor, vuelve a intentar en un minuto.');
 }
 
 module.exports = { generarPropuestaPublicacion };
