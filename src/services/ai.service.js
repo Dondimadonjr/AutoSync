@@ -7,6 +7,7 @@ const ai = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY });
 
 // Nombres oficiales soportados por el SDK @google/genai en v1beta
 const MODELOS_DISPONIBLES = [
+  'gmeini-3.6-flash',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-1.5-flash'
