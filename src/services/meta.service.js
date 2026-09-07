@@ -208,10 +208,45 @@ async function publicarEnFacebook(pageId, pageAccessToken, mediaUrl, caption) {
   }
 }
 
+/**
+ * Publica una Historia (Story) en una Página de Facebook
+ */
+async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo = false) {
+  try {
+    if (isVideo) {
+      // Publicar video story en Facebook Page
+      const res = await axios.post(`${GRAPH_API_URL}/${pageId}/video_stories`, null, {
+        params: {
+          file_url: mediaUrl,
+          access_token: pageAccessToken,
+        },
+      });
+      logger.info('Video Story publicada exitosamente en Facebook Page:', res.data);
+      return { postId: res.data.id };
+    }
+
+    // Publicar photo story en Facebook Page
+    const res = await axios.post(`${GRAPH_API_URL}/${pageId}/photo_stories`, null, {
+      params: {
+        url: mediaUrl,
+        access_token: pageAccessToken,
+      },
+    });
+    logger.info('Foto Story publicada exitosamente en Facebook Page:', res.data);
+    return { postId: res.data.id };
+
+  } catch (error) {
+    const errorMsg = error.response?.data?.error?.message || error.message;
+    logger.error('Error al publicar Story en Facebook Page:', { error: errorMsg });
+    throw new Error(`Facebook Story Error: ${errorMsg}`);
+  }
+}
+
 module.exports = {
   publicarEnInstagram,
   publicarReelInstagram,
   publicarStoryInstagram,
   publicarCarruselInstagram,
   publicarEnFacebook,
+  publicarStoryFacebook,
 };

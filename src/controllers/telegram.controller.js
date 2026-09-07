@@ -127,17 +127,15 @@ async function handleWebhook(req, res) {
 
             if (updateError) throw updateError;
 
-            await sendMessage(
-              chatId,
-              `📅 *Publicación programada exitosamente para:* *${fechaPart} a las ${horaPart}*\n\n` +
-              `Si deseas cambiar la fecha o editar el texto antes de publicarse, usa los botones a continuación:`
-            );
+            // 3. Respuesta unificada con confirmación, texto y botones interactivos
+            const encabezadoConfirmacion = `📅 *PUBLICACIÓN PROGRAMADA*\n📌 *Fecha:* ${fechaPart} a las ${horaPart}`;
 
             await enviarPropuestaInteractivamente(
               chatId,
               pubActualizada.id,
-              pubActualizada.caption,
-              pubActualizada.media_url
+              pubActualizada.caption || 'Sin caption',
+              pubActualizada.media_url,
+              encabezadoConfirmacion
             );
             return;
           }
@@ -155,7 +153,7 @@ async function handleWebhook(req, res) {
             await sendMessage(chatId, '🤖 *Regenerando propuesta con la IA según tus nuevas indicaciones...*');
 
             try {
-              const tipoContenido = 'Publicación para Instagram';
+              const tipoContenido = 'Publicación para Redes Sociales';
               const propuestaAI = await generarPropuestaPublicacion(tipoContenido, text, 'Instagram');
               const nuevoCaption = formatearCaptionIA(propuestaAI);
 
@@ -224,14 +222,17 @@ async function handleWebhook(req, res) {
             // Si fue la inserción inicial (primera foto), notificar y llamar a la IA
             await sendMessage(chatId, '📥 Álbum de carrusel detectado. Procesando imágenes y generando propuesta con la IA...');
 
-            const tipoContenido = 'Carrusel para Instagram';
+            const tipoContenido = 'Carrusel para Redes Sociales';
             const descripcion = caption || 'Publicación en carrusel con múltiples imágenes/videos';
             const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
             const captionTexto = formatearCaptionIA(propuesta);
 
             const { error: captionUpdateError } = await supabase
               .from('publicaciones')
-              .update({ caption: captionTexto })
+              .update({ 
+                caption: captionTexto,
+                plataformas: ['instagram', 'facebook'] // Activados por defecto
+              })
               .eq('id', resultadoUpsert.id);
 
             if (captionUpdateError) throw captionUpdateError;
@@ -263,7 +264,7 @@ async function handleWebhook(req, res) {
           await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando propuesta...');
 
           const mediaUrl = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
-          const tipoContenido = fotoArchivo ? 'Imagen para Instagram' : 'Reel de Instagram';
+          const tipoContenido = fotoArchivo ? 'Imagen para Redes Sociales' : 'Reel / Video corto';
           const descripcion = caption || 'Publicación visual atractiva para redes sociales';
 
           const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
@@ -280,7 +281,7 @@ async function handleWebhook(req, res) {
               caption: captionTexto,
               media_url: mediaUrl,
               media_urls: [mediaUrl],
-              plataformas: ['instagram'],
+              plataformas: ['instagram', 'facebook'], // Ambos destinos activados por defecto
               tipo_publicacion: 'FEED',
               estado: 'borrador',
             })
@@ -384,7 +385,7 @@ async function handleWebhook(req, res) {
 
             await sendMessage(
               chatId,
-              `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-05 21:15\``
+              `📅 *Modo programación activado.*\n\nEscribe la fecha y hora en la que deseas publicar usando el formato:\n\`AAAA-MM-DD HH:MM\`\n\n*Ejemplo:* \`2026-09-10 21:15\``
             );
           } else if (accion === 'editar') {
             await supabase

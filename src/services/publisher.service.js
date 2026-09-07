@@ -6,7 +6,8 @@ const {
   publicarStoryInstagram,
   publicarCarruselInstagram,
   publicarReelInstagram,
-  publicarEnFacebook
+  publicarEnFacebook,
+  publicarStoryFacebook
 } = require('./meta.service');
 const { sendMessage } = require('./telegram.service');
 
@@ -57,7 +58,12 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       : (publicacion.media_url ? [publicacion.media_url] : []);
 
     const esVideo = publicacion.media_url?.toLowerCase().includes('.mp4');
-    const plataformas = publicacion.plataformas || ['instagram'];
+    
+    // Plataformas seleccionadas (por defecto ambas si viene vacío)
+    const plataformas = (Array.isArray(publicacion.plataformas) && publicacion.plataformas.length > 0)
+      ? publicacion.plataformas
+      : ['instagram', 'facebook'];
+
     const resultados = [];
 
     // ---------------------------------------------------------------------
@@ -81,15 +87,20 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
         let resIg;
         let formatoTexto = 'Feed';
 
-        if (listaUrls.length > 1 || publicacion.tipo_publicacion === 'CAROUSEL') {
-          resIg = await publicarCarruselInstagram(instagramAccountId, igAccessToken, listaUrls, publicacion.caption);
-          formatoTexto = 'Carrusel';
-        } else if (publicacion.tipo_publicacion === 'STORY') {
+        // EVALUACIÓN ORDENADA DE FORMATOS DE INSTAGRAM:
+        // 1. STORY tiene prioridad absoluta sobre Carrusel/Feed
+        if (publicacion.tipo_publicacion === 'STORY') {
           resIg = await publicarStoryInstagram(instagramAccountId, igAccessToken, publicacion.media_url, esVideo);
           formatoTexto = 'Historia / Story';
+
+        } else if (listaUrls.length > 1 || publicacion.tipo_publicacion === 'CAROUSEL') {
+          resIg = await publicarCarruselInstagram(instagramAccountId, igAccessToken, listaUrls, publicacion.caption);
+          formatoTexto = 'Carrusel';
+
         } else if (esVideo) {
           resIg = await publicarReelInstagram(instagramAccountId, igAccessToken, publicacion.media_url, publicacion.caption);
           formatoTexto = 'Reel';
+
         } else {
           resIg = await publicarEnInstagram(instagramAccountId, igAccessToken, publicacion.media_url, publicacion.caption);
           formatoTexto = 'Feed';
@@ -112,18 +123,27 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
 
       const credsFb = credsFbList && credsFbList.length > 0 ? credsFbList[0] : null;
       const facebookPageId = credsFb?.cuenta_id || process.env.FACEBOOK_PAGE_ID;
-      const fbAccessToken = credsFb?.token_acceso || process.env.META_ACCESS_TOKEN;
+      const fbAccessToken = credsFb?.token_acceso || credsFb?.access_token || process.env.META_ACCESS_TOKEN;
 
       if (!facebookPageId || facebookPageId === 'undefined') {
         logger.warn('Credenciales de Facebook no encontradas, saltando Facebook...', { clienteId: publicacion.cliente_id });
       } else {
-        const resFb = await publicarEnFacebook(facebookPageId, fbAccessToken, publicacion.media_url, publicacion.caption);
-        resultados.push(`📘 *Facebook Page:* ID \`${resFb.postId}\``);
+        let resFb;
+        let formatoFb = 'Post';
+
+        if (publicacion.tipo_publicacion === 'STORY') {
+          resFb = await publicarStoryFacebook(facebookPageId, fbAccessToken, publicacion.media_url, esVideo);
+          formatoFb = 'Story';
+        } else {
+          resFb = await publicarEnFacebook(facebookPageId, fbAccessToken, publicacion.media_url, publicacion.caption);
+        }
+
+        resultados.push(`📘 *Facebook Page (${formatoFb}):* ID \`${resFb.postId}\``);
       }
     }
 
     if (resultados.length === 0) {
-      throw new Error('No se pudo publicar en ninguna red social. Verifica las credenciales configuradas.');
+      throw new Error('No se pudo publicar en ninguna red social. Verifica las credenciales configuradas en credenciales_redes.');
     }
 
     // 3. Actualizar estado a PUBLICADO en Supabase
