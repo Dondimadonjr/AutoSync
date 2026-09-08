@@ -238,7 +238,11 @@ async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo 
         },
       });
       logger.info('Video Story publicada exitosamente en Facebook Page:', res.data);
-      return { postId: res.data.id };
+      return { 
+        postId: res.data.post_id || res.data.id, 
+        post_id: res.data.post_id, 
+        id: res.data.id 
+      };
     }
 
     // PASO 1: Subir la foto como NO PUBLICADA para obtener el photo_id
@@ -264,7 +268,11 @@ async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo 
     });
 
     logger.info('Foto Story publicada exitosamente en Facebook Page:', storyRes.data);
-    return { postId: storyRes.data.id };
+    return { 
+      postId: storyRes.data.post_id || storyRes.data.id, 
+      post_id: storyRes.data.post_id, 
+      id: storyRes.data.id 
+    };
 
   } catch (error) {
     const errorMsg = error.response?.data?.error?.message || error.message;
@@ -278,7 +286,11 @@ async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo 
         access_token: pageAccessToken,
       },
     });
-    return { postId: resFallback.data.id };
+    return { 
+      postId: resFallback.data.post_id || resFallback.data.id, 
+      post_id: resFallback.data.post_id, 
+      id: resFallback.data.id 
+    };
   }
 }
 

@@ -1,3 +1,4 @@
+const axios = require('axios');
 const supabase = require('../config/supabase');
 const logger = require('../config/logger');
 const { POST_STATUS } = require('../constants');
@@ -141,7 +142,8 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
           resFb = await publicarEnFacebook(facebookPageId, fbAccessToken, publicacion.media_url, publicacion.caption);
         }
 
-        resultados.push(`📘 *Facebook Page (${formatoFb}):* ID \`${resFb.postId}\``);
+        const fbStoryId = resFb?.post_id || resFb?.id || resFb?.postId || 'Publicado';
+        resultados.push(`📘 *Facebook Page (${formatoFb}):* ID \`${fbStoryId}\``);
       }
     }
 
@@ -150,25 +152,40 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
     // ---------------------------------------------------------------------
     if (plataformas.includes('threads')) {
       try {
-        const { data: credsList } = await supabase
+        const { data: credThreads } = await supabase
           .from('credenciales_redes')
           .select('*')
           .eq('cliente_id', publicacion.cliente_id)
-          .in('plataforma', ['threads', 'instagram', 'facebook']);
+          .eq('plataforma', 'threads')
+          .maybeSingle();
 
-        const credThreads = credsList?.find((c) => c.plataforma === 'threads');
-        const credIG = credsList?.find((c) => c.plataforma === 'instagram');
-        const credFB = credsList?.find((c) => c.plataforma === 'facebook');
+        const { data: credFb } = await supabase
+          .from('credenciales_redes')
+          .select('*')
+          .eq('cliente_id', publicacion.cliente_id)
+          .eq('plataforma', 'facebook')
+          .maybeSingle();
 
-        // Fallback jerárquico: Threads -> Instagram -> Facebook
-        const threadsUserId = credThreads?.cuenta_id || credIG?.cuenta_id || credFB?.cuenta_id;
-        const threadsToken = credThreads?.token_acceso || credIG?.token_acceso || credFB?.token_acceso;
+        let threadsUserId = credThreads?.cuenta_id;
+        const threadsToken = credThreads?.token_acceso || credFb?.token_acceso || process.env.META_ACCESS_TOKEN;
+
+        // Si no hay un ID explícito de Threads, obtenemos el ID real mediante /me con el token de Threads
+        if (!threadsUserId && threadsToken) {
+          try {
+            const meRes = await axios.get('https://graph.threads.net/v1.0/me', {
+              params: { access_token: threadsToken, fields: 'id,username' }
+            });
+            threadsUserId = meRes.data?.id;
+          } catch (errMe) {
+            logger.warn('No se pudo obtener threadsUserId mediante /me:', { error: errMe.message });
+          }
+        }
 
         if (threadsUserId && threadsToken) {
           const resThreads = await publicarEnThreads(threadsUserId, threadsToken, publicacion.media_url, publicacion.caption);
-          resultados.push(`🧵 *Threads:* ID \`${resThreads.postId}\``);
+          resultados.push(`🧵 *Threads:* ID \`${resThreads.postId || resThreads.id || 'Publicado'}\``);
         } else {
-          logger.warn('Credenciales de Threads no encontradas, saltando Threads...', { clienteId: publicacion.cliente_id });
+          logger.warn('Credenciales de Threads no encontradas o incompletas, saltando Threads...', { clienteId: publicacion.cliente_id });
         }
       } catch (errThreads) {
         logger.error('Error en publicación de Threads:', { error: errThreads.message });
