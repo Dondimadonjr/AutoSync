@@ -48,31 +48,9 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       return;
     }
 
-    if (publicacion.estado === (POST_STATUS.PUBLICADO || 'PUBLICADO')) {
+    if (publicacion.estado === POST_STATUS.PUBLICADO) {
       await sendMessage(chatId, '⚠️ Esta publicación ya fue publicada anteriormente.');
       return;
-    }
-
-    if (plataformas.includes('threads')) {
-      try {
-        // Busca credencial para la plataforma threads (o usa el token de usuario Meta)
-        const { data: credThreads } = await supabase
-          .from('credenciales_redes')
-          .select('*')
-          .eq('cliente_id', post.cliente_id)
-          .eq('plataforma', 'threads')
-          .maybeSingle();
-
-        const threadsUserId = credThreads?.cuenta_id || credsMeta?.cuenta_id;
-        const threadsToken = credThreads?.token_acceso || credsMeta?.token_acceso;
-
-        if (threadsUserId && threadsToken) {
-          const resThreads = await publicarEnThreads(threadsUserId, threadsToken, post.media_url, post.caption);
-          resultados.push(`🧵 *Threads:* ID \`${resThreads.postId}\``);
-        }
-      } catch (errThreads) {
-        logger.error('Error en publicación de Threads:', { error: errThreads.message });
-      }
     }
 
     // 2. Normalizar la lista de URLs
@@ -81,9 +59,9 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       : (publicacion.media_url ? [publicacion.media_url] : []);
 
     const esVideo = publicacion.media_url?.toLowerCase().includes('.mp4');
-    
-    // Plataformas seleccionadas (por defecto ambas)
-    const plataformas = (Array.isArray(publicacion.plataformas) && publicacion.plataformas.length > 0)
+
+    // Plataformas seleccionadas — DECLARAR ANTES DE CUALQUIER USO
+    const plataformas = Array.isArray(publicacion.plataformas) && publicacion.plataformas.length > 0
       ? publicacion.plataformas
       : ['instagram', 'facebook'];
 
@@ -167,13 +145,41 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       }
     }
 
+    // ---------------------------------------------------------------------
+    // C. PUBLICAR EN THREADS
+    // ---------------------------------------------------------------------
+    if (plataformas.includes('threads')) {
+      try {
+        const { data: credThreadsList } = await supabase
+          .from('credenciales_redes')
+          .select('*')
+          .eq('cliente_id', publicacion.cliente_id)
+          .in('plataforma', ['threads', 'facebook']);
+
+        const credThreads = credThreadsList?.find((c) => c.plataforma === 'threads');
+        const credFbFallback = credThreadsList?.find((c) => c.plataforma === 'facebook');
+
+        const threadsUserId = credThreads?.cuenta_id;
+        const threadsToken = credThreads?.token_acceso || credFbFallback?.token_acceso;
+
+        if (threadsUserId && threadsToken) {
+          const resThreads = await publicarEnThreads(threadsUserId, threadsToken, publicacion.media_url, publicacion.caption);
+          resultados.push(`🧵 *Threads:* ID \`${resThreads.postId}\``);
+        } else {
+          logger.warn('Credenciales de Threads no encontradas, saltando Threads...', { clienteId: publicacion.cliente_id });
+        }
+      } catch (errThreads) {
+        logger.error('Error en publicación de Threads:', { error: errThreads.message });
+      }
+    }
+
     if (resultados.length === 0) {
       throw new Error('No se pudo publicar en ninguna red social. Verifica las credenciales configuradas en credenciales_redes.');
     }
 
     // 3. Actualizar estado a PUBLICADO en Supabase
     const payloadUpdate = {
-      estado: POST_STATUS.PUBLICADO || 'PUBLICADO',
+      estado: POST_STATUS.PUBLICADO,
       publicado_en: new Date().toISOString(),
     };
 

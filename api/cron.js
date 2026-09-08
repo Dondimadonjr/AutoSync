@@ -29,8 +29,16 @@ module.exports = async function handler(req, res) {
 
     // 2. Procesar cada publicación pendiente invocando el servicio central
     for (const pub of pendientes) {
-      const chatId = pub.clientes?.telegram_chat_id || process.env.TELEGRAM_ADMIN_CHAT_ID;
-      
+      // Garantizar un chatId válido con todos los fallbacks posibles
+      const chatId = pub.clientes?.telegram_chat_id 
+        || pub.telegram_chat_id 
+        || process.env.TELEGRAM_ADMIN_CHAT_ID;
+
+      if (!chatId) {
+        logger.error(`[CRON] No se encontró chatId para el post ${pub.id}. Saltando.`);
+        continue;
+      }
+
       try {
         // Ejecuta el flujo completo (Instagram + Facebook Page + Telegram Chat)
         await procesarAprobacionAsync(pub.id, chatId);
