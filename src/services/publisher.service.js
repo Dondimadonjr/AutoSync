@@ -150,17 +150,19 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
     // ---------------------------------------------------------------------
     if (plataformas.includes('threads')) {
       try {
-        const { data: credThreadsList } = await supabase
+        const { data: credsList } = await supabase
           .from('credenciales_redes')
           .select('*')
           .eq('cliente_id', publicacion.cliente_id)
-          .in('plataforma', ['threads', 'facebook']);
+          .in('plataforma', ['threads', 'instagram', 'facebook']);
 
-        const credThreads = credThreadsList?.find((c) => c.plataforma === 'threads');
-        const credFbFallback = credThreadsList?.find((c) => c.plataforma === 'facebook');
+        const credThreads = credsList?.find((c) => c.plataforma === 'threads');
+        const credIG = credsList?.find((c) => c.plataforma === 'instagram');
+        const credFB = credsList?.find((c) => c.plataforma === 'facebook');
 
-        const threadsUserId = credThreads?.cuenta_id;
-        const threadsToken = credThreads?.token_acceso || credFbFallback?.token_acceso;
+        // Fallback jerárquico: Threads -> Instagram -> Facebook
+        const threadsUserId = credThreads?.cuenta_id || credIG?.cuenta_id || credFB?.cuenta_id;
+        const threadsToken = credThreads?.token_acceso || credIG?.token_acceso || credFB?.token_acceso;
 
         if (threadsUserId && threadsToken) {
           const resThreads = await publicarEnThreads(threadsUserId, threadsToken, publicacion.media_url, publicacion.caption);
@@ -171,10 +173,6 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
       } catch (errThreads) {
         logger.error('Error en publicación de Threads:', { error: errThreads.message });
       }
-    }
-
-    if (resultados.length === 0) {
-      throw new Error('No se pudo publicar en ninguna red social. Verifica las credenciales configuradas en credenciales_redes.');
     }
 
     // 3. Actualizar estado a PUBLICADO en Supabase
