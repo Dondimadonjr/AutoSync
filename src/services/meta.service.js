@@ -227,9 +227,6 @@ async function publicarEnFacebook(pageId, pageAccessToken, mediaUrl, caption) {
 /**
  * Publica una Historia (Story) nativa en una Página de Facebook
  */
-/**
- * Publica una Historia (Story) nativa en una Página de Facebook
- */
 async function publicarStoryFacebook(pageId, pageAccessToken, mediaUrl, isVideo = false) {
   try {
     if (isVideo) {
