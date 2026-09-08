@@ -1,7 +1,8 @@
 const axios = require('axios');
 const logger = require('../config/logger');
 
-const THREADS_API_URL = 'https://graph.threads.net/v1.0';
+// Usar la URL unificada de Graph API de Meta (los tokens de páginas NO son válidos en graph.threads.net)
+const THREADS_API_URL = 'https://graph.facebook.com/v19.0';
 
 /**
  * Publica un post de texto con foto o video en Threads
