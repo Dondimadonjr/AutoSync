@@ -6,7 +6,7 @@ const GenerarPostSchema = z.object({
   descripcion: z.string().min(5, 'La descripción debe tener al menos 5 caracteres'),
   mediaUrl: z.string().url('mediaUrl debe ser una URL válida (ej. video en Supabase Storage o CDN)'),
   chatId: z.union([z.string(), z.number()]).optional(),
-  plataformas: z.array(z.enum(['instagram', 'tiktok', 'facebook'])).default(['instagram']),
+  plataformas: z.array(z.enum(['instagram', 'tiktok', 'facebook', 'threads'])).default(['instagram']),
 });
 
 module.exports = {

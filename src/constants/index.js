@@ -8,6 +8,11 @@ const POST_STATUS = Object.freeze({
   PUBLICADO: 'publicado',
   FALLIDO: 'fallido',
   RECHAZADO: 'rechazado',
+  CANCELADO: 'CANCELADO',
+  PROGRAMADO: 'PROGRAMADO',
+  PENDIENTE_APROBACION: 'borrador',
+  PENDIENTE_FECHA: 'PENDIENTE_FECHA',
+  PENDIENTE_EDITAR: 'PENDIENTE_EDITAR',
 });
 
 const PLATFORMS = Object.freeze({

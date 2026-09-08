@@ -4,13 +4,13 @@ const {
   sendMessage, 
   answerCallbackQuery, 
   enviarPropuestaInteractivamente, 
-  listarPublicacionesAgendadas 
 } = require('../services/telegram.service');
 const { procesarAprobacionAsync, procesarRechazo } = require('../services/publisher.service');
 const { subirVideoDesdeTelegram } = require('../services/storage.service');
 const { generarPropuestaPublicacion } = require('../services/ai.service');
 const supabase = require('../config/supabase');
 const { POST_STATUS } = require('../constants');
+const { listarAgendados } = require('./agendados.controller');
 
 /**
  * Formatea la propuesta devuelta por la IA a texto plano con hashtags
@@ -52,19 +52,7 @@ async function handleWebhook(req, res) {
 
         // 2. Comando /agendados
         if (text && text.startsWith('/agendados')) {
-          const { data: agendados, error } = await supabase
-            .from('publicaciones')
-            .select('*')
-            .eq('estado', POST_STATUS.PROGRAMADO || 'PROGRAMADO')
-            .order('programado_para', { ascending: true });
-
-          if (error) {
-            logger.error('Error al obtener agendados:', error);
-            await sendMessage(chatId, '❌ Error al consultar las publicaciones agendadas.');
-            return;
-          }
-
-          await listarPublicacionesAgendadas(chatId, agendados);
+          await listarAgendados(chatId);
           return;
         }
 
@@ -231,7 +219,7 @@ async function handleWebhook(req, res) {
               .from('publicaciones')
               .update({ 
                 caption: captionTexto,
-                plataformas: ['instagram', 'facebook'] // Activados por defecto
+                plataformas: ['instagram', 'facebook', 'threads', 'tiktok'] // Activados por defecto
               })
               .eq('id', resultadoUpsert.id);
 
@@ -281,7 +269,7 @@ async function handleWebhook(req, res) {
               caption: captionTexto,
               media_url: mediaUrl,
               media_urls: [mediaUrl],
-              plataformas: ['instagram', 'facebook'], // Ambos destinos activados por defecto
+              plataformas: ['instagram', 'facebook', 'threads', 'tiktok'], // Ambos destinos activados por defecto
               tipo_publicacion: 'FEED',
               estado: 'borrador',
             })
@@ -303,6 +291,37 @@ async function handleWebhook(req, res) {
         const chatId = message.chat.id;
 
         await answerCallbackQuery(callbackQueryId);
+
+        // Acción: ver_agendados (botón de lista)
+        if (data === 'ver_agendados') {
+          await listarAgendados(chatId);
+          return;
+        }
+
+        // Acción: force_publish_ (Publicar Ahora desde lista de agendados)
+        if (data.startsWith('force_publish_')) {
+          const publicacionId = data.replace('force_publish_', '');
+          await sendMessage(chatId, `⏳ Procesando publicación inmediata para el ID \`${publicacionId}\`...`);
+          await procesarAprobacionAsync(publicacionId, chatId);
+          return;
+        }
+
+        // Acción: cancel_schedule_ (Cancelar agendamiento desde lista de agendados)
+        if (data.startsWith('cancel_schedule_')) {
+          const publicacionId = data.replace('cancel_schedule_', '');
+
+          const { error: cancelScheduleError } = await supabase
+            .from('publicaciones')
+            .update({ estado: POST_STATUS.CANCELADO })
+            .eq('id', publicacionId);
+
+          if (cancelScheduleError) {
+            await sendMessage(chatId, `❌ No se pudo cancelar la publicación \`${publicacionId}\`.`);
+          } else {
+            await sendMessage(chatId, `🗑️ *Publicación \`${publicacionId}\` cancelada correctamente.*`);
+          }
+          return;
+        }
 
         const parts = data.split('_');
         const accion = parts[0];
