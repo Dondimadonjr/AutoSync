@@ -6,8 +6,8 @@ const {
   enviarPropuestaInteractivamente, 
 } = require('../services/telegram.service');
 const { procesarAprobacionAsync, procesarRechazo } = require('../services/publisher.service');
-const { subirVideoDesdeTelegram } = require('../services/storage.service');
-const { generarPropuestaPublicacion } = require('../services/ai.service');
+const { subirVideoDesdeTelegram, descargarArchivoTelegram, subirBufferASupabase } = require('../services/storage.service');
+const { generarPropuestaPublicacion, generarPropuestaConImagen } = require('../services/ai.service');
 const supabase = require('../config/supabase');
 const { POST_STATUS } = require('../constants');
 const { listarAgendados } = require('./agendados.controller');
@@ -141,8 +141,18 @@ async function handleWebhook(req, res) {
             await sendMessage(chatId, '🤖 *Regenerando propuesta con la IA según tus nuevas indicaciones...*');
 
             try {
-              const tipoContenido = 'Publicación para Redes Sociales';
-              const propuestaAI = await generarPropuestaPublicacion(tipoContenido, text, 'Instagram');
+              // Recuperar la imagen original para re-analizarla junto con la corrección del usuario
+              let propuestaAI;
+              if (pubPendienteEditar.media_url && !pubPendienteEditar.media_url.toLowerCase().includes('.mp4')) {
+                const axios = require('axios');
+                const imgRes = await axios.get(pubPendienteEditar.media_url, { responseType: 'arraybuffer' });
+                const imgBuffer = Buffer.from(imgRes.data, 'binary');
+                const mimeType = pubPendienteEditar.media_url.toLowerCase().includes('.png') ? 'image/png' : 'image/jpeg';
+                propuestaAI = await generarPropuestaConImagen(imgBuffer, mimeType, text);
+              } else {
+                // Fallback para videos o si no hay imagen: usar prompt de texto
+                propuestaAI = await generarPropuestaPublicacion('Publicación para Redes Sociales', text, 'Instagram');
+              }
               const nuevoCaption = formatearCaptionIA(propuestaAI);
 
               const { data: pubActualizada, error: updateError } = await supabase
@@ -249,15 +259,23 @@ async function handleWebhook(req, res) {
           }
 
           // B. ARCHIVO ÚNICO (Post Normal / Story / Reel)
-          await sendMessage(chatId, '📥 Archivo recibido. Subiéndolo a Supabase Storage y generando propuesta...');
+          await sendMessage(chatId, '📥 Archivo recibido. Analizando imagen con IA y subiendo a Supabase Storage...');
 
-          const mediaUrl = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
-          const tipoContenido = fotoArchivo ? 'Imagen para Redes Sociales' : 'Reel / Video corto';
-          const descripcion = caption || 'Publicación visual atractiva para redes sociales';
+          // 1. Descargar el buffer PRIMERO para pasarlo a Gemini (visión multimodal)
+          const { buffer: mediaBuffer, contentType: mediaContentType, ext: mediaExt } = await descargarArchivoTelegram(archivoMultimedia.file_id);
 
-          const propuesta = await generarPropuestaPublicacion(tipoContenido, descripcion, 'Instagram');
+          // 2. Generar propuesta con la imagen real (multimodal) si es foto; texto si es video
+          let propuesta;
+          const esVideoArchivo = ['mp4', 'mov', 'avi', 'mkv'].includes(mediaExt);
+          if (!esVideoArchivo) {
+            propuesta = await generarPropuestaConImagen(mediaBuffer, mediaContentType, caption || '');
+          } else {
+            propuesta = await generarPropuestaPublicacion('Reel / Video corto', caption || 'Video atractivo para redes sociales', 'Instagram');
+          }
           const captionTexto = formatearCaptionIA(propuesta);
 
+          // 3. Subir el buffer ya descargado a Supabase Storage
+          const mediaUrl = await subirBufferASupabase(mediaBuffer, mediaContentType, mediaExt);
           let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
           const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
           if (clienteDB) clienteId = clienteDB.id;

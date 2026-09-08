@@ -102,4 +102,93 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
   throw new Error('Servidores de IA saturados temporalmente o límite de cuota alcanzado. Por favor, vuelve a intentar en un minuto.');
 }
 
-module.exports = { generarPropuestaPublicacion };
+/**
+ * Genera un caption multimodal enviando la imagen a Gemini junto con el prompt.
+ * La IA analiza visualmente el contenido real de la foto antes de redactar.
+ *
+ * @param {Buffer} imageBuffer  Buffer de la imagen descargada de Telegram
+ * @param {string} mimeType     MIME type (ej: 'image/jpeg')
+ * @param {string} instruccionUsuario  Texto adicional del usuario (caption de Telegram, correcciones, etc.)
+ * @returns {Promise<object>}   Objeto con { caption, hashtags, sugerencia_visual }
+ */
+async function generarPropuestaConImagen(imageBuffer, mimeType = 'image/jpeg', instruccionUsuario = '') {
+  const imagePart = {
+    inlineData: {
+      data: imageBuffer.toString('base64'),
+      mimeType,
+    },
+  };
+
+  const promptText = `
+Eres un Community Manager experto en Marketing Digital y Copywriting para redes sociales.
+
+INSTRUCCIÓN OBLIGATORIA DE VISIÓN:
+Analiza la imagen adjunta con máxima precisión visual ANTES de redactar cualquier texto.
+Identifica exactamente qué objeto, producto, planta o escena aparece en la fotografía.
+Habla específica y concretamente de lo que ves: NO uses descripciones genéricas si puedes identificar el elemento real.
+
+${instruccionUsuario ? `Indicación adicional del usuario (úsala como contexto complementario, sin contradecir lo que ves en la imagen): "${instruccionUsuario}"` : ''}
+
+INSTRUCCIONES DE FORMATO:
+Responde ÚNICAMENTE en formato JSON estricto sin bloques de texto adicional ni Markdown fuera del objeto:
+{
+  "caption": "Texto llamativo con ganchos persuasivos, descripción precisa basada en la imagen, CTA efectiva y emojis acordes.",
+  "hashtags": ["#tag1", "#tag2", "#tag3", "#tag4", "#tag5"],
+  "sugerencia_visual": "Idea rápida de encuadre o composición para potenciar este post"
+}
+  `;
+
+  let ultimoError = null;
+
+  for (const nombreModelo of MODELOS_DISPONIBLES) {
+    for (let intento = 1; intento <= MAX_INTENTOS_POR_MODELO; intento++) {
+      try {
+        logger.info(`[Multimodal] Intento ${intento} con modelo ${nombreModelo}`);
+
+        const response = await ai.models.generateContent({
+          model: nombreModelo,
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: promptText }, imagePart],
+            },
+          ],
+          config: {
+            responseMimeType: 'application/json',
+          },
+        });
+
+        let rawText = response.text || '';
+        rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+        const parsed = JSON.parse(rawText);
+
+        if (typeof parsed.hashtags === 'string') {
+          parsed.hashtags = parsed.hashtags.split(/\s+/).filter(Boolean);
+        } else if (!Array.isArray(parsed.hashtags)) {
+          parsed.hashtags = [];
+        }
+
+        logger.info(`[Multimodal] Propuesta generada con ${nombreModelo} (intento ${intento})`);
+        return parsed;
+
+      } catch (error) {
+        ultimoError = error;
+        const errorMsg = error.message || '';
+        logger.warn(`[Multimodal] Error en ${nombreModelo} (Intento ${intento}/${MAX_INTENTOS_POR_MODELO}): ${errorMsg}`);
+
+        if (errorMsg.includes('404') || errorMsg.includes('NOT_FOUND')) break;
+
+        const esErrorCuotaOServidor = errorMsg.includes('429') || errorMsg.includes('RESOURCE_EXHAUSTED') || errorMsg.includes('503');
+        if (intento < MAX_INTENTOS_POR_MODELO && esErrorCuotaOServidor) {
+          await esperar(intento * 3000);
+        }
+      }
+    }
+  }
+
+  logger.error('[Multimodal] Todos los modelos fallaron:', { error: ultimoError?.message });
+  throw new Error('Servidores de IA saturados temporalmente. Por favor, vuelve a intentar en un minuto.');
+}
+
+module.exports = { generarPropuestaPublicacion, generarPropuestaConImagen };

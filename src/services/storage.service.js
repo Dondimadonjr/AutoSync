@@ -79,6 +79,69 @@ async function subirVideoDesdeTelegram(fileId) {
   }
 }
 
+/**
+ * Descarga un archivo de Telegram y retorna su buffer + metadata (sin subir a Storage).
+ * Útil para pasar la imagen a Gemini antes de almacenarla.
+ * @param {string} fileId ID del archivo en Telegram
+ * @returns {Promise<{ buffer: Buffer, contentType: string, ext: string, fileUrl: string }>}
+ */
+async function descargarArchivoTelegram(fileId) {
+  const botToken = env.TELEGRAM_BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+
+  if (!botToken) {
+    throw new Error('TELEGRAM_BOT_TOKEN no está definido en las variables de entorno.');
+  }
+
+  const fileRes = await axios.get(`https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`);
+
+  if (!fileRes.data.ok) {
+    throw new Error(`Telegram API Error: ${fileRes.data.description}`);
+  }
+
+  const filePath = fileRes.data.result.file_path;
+  const fileUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+
+  let ext = 'jpg';
+  if (filePath.includes('.')) {
+    ext = filePath.split('.').pop().toLowerCase();
+  }
+
+  const esVideo = ['mp4', 'mov', 'avi', 'mkv'].includes(ext);
+  const contentType = esVideo
+    ? `video/${ext === 'mov' ? 'quicktime' : 'mp4'}`
+    : `image/${ext === 'png' ? 'png' : 'jpeg'}`;
+
+  const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+  const buffer = Buffer.from(response.data, 'binary');
+
+  return { buffer, contentType, ext, fileUrl };
+}
+
+/**
+ * Sube un buffer ya descargado a Supabase Storage y retorna la URL pública.
+ * @param {Buffer} buffer  Contenido del archivo
+ * @param {string} contentType  MIME type
+ * @param {string} ext  Extensión del archivo (sin punto)
+ * @returns {Promise<string>} URL pública
+ */
+async function subirBufferASupabase(buffer, contentType, ext) {
+  const fileName = `telegram_${Date.now()}_${Math.random().toString(36).substring(7)}.${ext}`;
+
+  const { error } = await supabase.storage
+    .from('media')
+    .upload(fileName, buffer, { contentType, upsert: true });
+
+  if (error) throw error;
+
+  const { data: publicUrlData } = supabase.storage.from('media').getPublicUrl(fileName);
+
+  logger.info('Buffer subido exitosamente a Supabase Storage', { fileName, contentType, publicUrl: publicUrlData.publicUrl });
+
+  return publicUrlData.publicUrl;
+}
+
 module.exports = {
   subirVideoDesdeTelegram,
+  descargarArchivoTelegram,
+  subirBufferASupabase,
 };
