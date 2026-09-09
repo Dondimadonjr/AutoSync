@@ -62,6 +62,16 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
           },
         });
 
+        // 1. Obtener el desglose de tokens de la respuesta de Gemini
+        const usage = response.usageMetadata || {};
+
+        logger.info('Tokens consumidos en esta generación:', {
+          modelo: nombreModelo,
+          promptTokens: usage.promptTokenCount,        // Tokens del prompt enviado
+          candidateTokens: usage.candidatesTokenCount, // Tokens del texto generado (caption)
+          totalTokens: usage.totalTokenCount,          // Total consumido
+        });
+
         let rawText = response.text || '';
         rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
@@ -72,6 +82,14 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
         } else if (!Array.isArray(parsed.hashtags)) {
           parsed.hashtags = [];
         }
+
+        // 2. Adjuntar metadatos de tokens al objeto de propuesta
+        parsed.tokens = usage.totalTokenCount || 0;
+        parsed.usage = {
+          promptTokens: usage.promptTokenCount || 0,
+          candidateTokens: usage.candidatesTokenCount || 0,
+          totalTokens: usage.totalTokenCount || 0,
+        };
 
         logger.info(`Propuesta generada exitosamente en el intento ${intento} con ${nombreModelo}`);
         return parsed;
@@ -109,7 +127,7 @@ async function generarPropuestaPublicacion(input, descripcionCorta, redSocial = 
  * @param {Buffer} imageBuffer  Buffer de la imagen descargada de Telegram
  * @param {string} mimeType     MIME type (ej: 'image/jpeg')
  * @param {string} instruccionUsuario  Texto adicional del usuario (caption de Telegram, correcciones, etc.)
- * @returns {Promise<object>}   Objeto con { caption, hashtags, sugerencia_visual }
+ * @returns {Promise<object>}   Objeto con { caption, hashtags, sugerencia_visual, tokens, usage }
  */
 async function generarPropuestaConImagen(imageBuffer, mimeType = 'image/jpeg', instruccionUsuario = '') {
   const imagePart = {
@@ -158,6 +176,16 @@ Responde ÚNICAMENTE en formato JSON estricto sin bloques de texto adicional ni 
           },
         });
 
+        // 1. Obtener el desglose de tokens de la respuesta de Gemini
+        const usage = response.usageMetadata || {};
+
+        logger.info('[Multimodal] Tokens consumidos en esta generación:', {
+          modelo: nombreModelo,
+          promptTokens: usage.promptTokenCount,        // Tokens de la imagen + prompt enviado
+          candidateTokens: usage.candidatesTokenCount, // Tokens del texto generado (caption)
+          totalTokens: usage.totalTokenCount,          // Total consumido
+        });
+
         let rawText = response.text || '';
         rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
@@ -168,6 +196,14 @@ Responde ÚNICAMENTE en formato JSON estricto sin bloques de texto adicional ni 
         } else if (!Array.isArray(parsed.hashtags)) {
           parsed.hashtags = [];
         }
+
+        // 2. Adjuntar metadatos de tokens al objeto de propuesta
+        parsed.tokens = usage.totalTokenCount || 0;
+        parsed.usage = {
+          promptTokens: usage.promptTokenCount || 0,
+          candidateTokens: usage.candidatesTokenCount || 0,
+          totalTokens: usage.totalTokenCount || 0,
+        };
 
         logger.info(`[Multimodal] Propuesta generada con ${nombreModelo} (intento ${intento})`);
         return parsed;

@@ -5,7 +5,7 @@ const {
   answerCallbackQuery, 
   enviarPropuestaInteractivamente, 
 } = require('../services/telegram.service');
-const { procesarAprobacionAsync, procesarRechazo } = require('../services/publisher.service');
+const { procesarAprobacionAsync, procesarRechazo, registrarLog } = require('../services/publisher.service');
 const { subirVideoDesdeTelegram, descargarArchivoTelegram, subirBufferASupabase } = require('../services/storage.service');
 const { generarPropuestaPublicacion, generarPropuestaConImagen } = require('../services/ai.service');
 const supabase = require('../config/supabase');
@@ -159,6 +159,7 @@ async function handleWebhook(req, res) {
                 .from('publicaciones')
                 .update({ 
                   caption: nuevoCaption,
+                  tokens_usados: propuestaAI?.tokens || 0,
                   estado: POST_STATUS.PENDIENTE_APROBACION || 'borrador'
                 })
                 .eq('id', pubPendienteEditar.id)
@@ -166,6 +167,11 @@ async function handleWebhook(req, res) {
                 .single();
 
               if (updateError) throw updateError;
+
+              await registrarLog(pubActualizada.id, 'PROPUESTA_REGENERADA', 'INFO', {
+                tokens: propuestaAI?.tokens,
+                usage: propuestaAI?.usage,
+              });
 
               await sendMessage(chatId, '✅ *Caption regenerado por la IA con éxito.* Revisa la nueva versión:');
 
@@ -229,11 +235,17 @@ async function handleWebhook(req, res) {
               .from('publicaciones')
               .update({ 
                 caption: captionTexto,
+                tokens_usados: propuesta?.tokens || 0,
                 plataformas: ['instagram', 'facebook', 'threads', 'tiktok'] // Activados por defecto
               })
               .eq('id', resultadoUpsert.id);
 
             if (captionUpdateError) throw captionUpdateError;
+
+            await registrarLog(resultadoUpsert.id, 'CARRUSEL_PROPUESTA_GENERADA', 'INFO', {
+              tokens: propuesta?.tokens,
+              usage: propuesta?.usage,
+            });
 
             // Pausa estratégica para esperar la subida paralela de los demás archivos del álbum
             await new Promise((resolve) => setTimeout(resolve, 4500));
@@ -285,6 +297,7 @@ async function handleWebhook(req, res) {
             .insert({
               cliente_id: clienteId,
               caption: captionTexto,
+              tokens_usados: propuesta?.tokens || 0,
               media_url: mediaUrl,
               media_urls: [mediaUrl],
               plataformas: ['instagram', 'facebook', 'threads', 'tiktok'], // Ambos destinos activados por defecto
@@ -295,6 +308,11 @@ async function handleWebhook(req, res) {
             .single();
 
           if (dbError) throw dbError;
+
+          await registrarLog(nuevaPublicacion.id, 'PROPUESTA_GENERADA', 'INFO', {
+            tokens: propuesta?.tokens,
+            usage: propuesta?.usage,
+          });
 
           await enviarPropuestaInteractivamente(chatId, nuevaPublicacion.id, propuesta, mediaUrl);
           return;

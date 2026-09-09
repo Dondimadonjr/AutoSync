@@ -46,6 +46,7 @@ async function generarPost(req, res, _next) {
         .insert({
           cliente_id: clienteId,
           caption: captionCompleto,
+          tokens_usados: propuesta?.tokens || 0,
           media_url: mediaUrl,
           plataformas: plataformas || ['instagram'],
           estado: POST_STATUS.BORRADOR,
@@ -58,7 +59,12 @@ async function generarPost(req, res, _next) {
         return;
       }
 
-      await registrarLog(publicacion.id, 'BORRADOR_CREADO', 'INFO', { producto, clienteId });
+      await registrarLog(publicacion.id, 'BORRADOR_CREADO', 'INFO', { 
+        producto, 
+        clienteId,
+        tokens: propuesta.tokens,
+        usage: propuesta.usage,
+      });
 
       // Enviar tarjeta interactiva a Telegram
       const telegramRes = await enviarPropuestaInteractivamente(
