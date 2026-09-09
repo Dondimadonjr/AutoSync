@@ -1,31 +1,27 @@
 const axios = require('axios');
 const logger = require('../config/logger');
 
-// Usar la URL unificada de Graph API de Meta (los tokens de páginas NO son válidos en graph.threads.net)
-const THREADS_API_URL = 'https://graph.facebook.com/v19.0';
+// URL base oficial para la API de Threads
+const THREADS_API_URL = 'https://graph.threads.net/v1.0';
 
-/**
- * Publica un post de texto con foto o video en Threads
- */
 async function publicarEnThreads(threadsUserId, accessToken, mediaUrl, text) {
   try {
     const isVideo = typeof mediaUrl === 'string' && mediaUrl.toLowerCase().includes('.mp4');
 
-    // STEP 1: Crear el contenedor en Threads
     logger.info('Creando contenedor en Threads...', { threadsUserId });
-    const containerParams = {
-      access_token: accessToken,
-      media_type: isVideo ? 'VIDEO' : (mediaUrl ? 'IMAGE' : 'TEXT'),
-      text: text,
-      ...(mediaUrl && (isVideo ? { video_url: mediaUrl } : { image_url: mediaUrl })),
-    };
-
+    
+    // STEP 1: Crear el contenedor
     const containerRes = await axios.post(`${THREADS_API_URL}/${threadsUserId}/threads`, null, {
-      params: containerParams,
+      params: {
+        access_token: accessToken,
+        media_type: isVideo ? 'VIDEO' : (mediaUrl ? 'IMAGE' : 'TEXT'),
+        text: text,
+        ...(mediaUrl && (isVideo ? { video_url: mediaUrl } : { image_url: mediaUrl })),
+      },
     });
+
     const creationId = containerRes.data.id;
 
-    // Si tiene media, esperamos 5 segundos para asegurar procesamiento
     if (mediaUrl) {
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
@@ -39,9 +35,7 @@ async function publicarEnThreads(threadsUserId, accessToken, mediaUrl, text) {
       },
     });
 
-    logger.info('Publicado exitosamente en Threads:', publishRes.data);
     return { postId: publishRes.data.id };
-
   } catch (error) {
     const errorMsg = error.response?.data?.error?.message || error.message;
     logger.error('Error al publicar en Threads:', { error: errorMsg });
