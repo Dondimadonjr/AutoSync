@@ -12,15 +12,15 @@ async function publicarEnThreads(threadsUserId, accessToken, mediaUrl, text) {
 
     // Limitar el texto a un máximo de 500 caracteres para Threads
     const textForThreads = text && text.length > 500 
-    ? text.substring(0, 497) + '...' 
-    : text;
+      ? text.substring(0, 497) + '...' 
+      : text;
     
     // STEP 1: Crear el contenedor
     const containerRes = await axios.post(`${THREADS_API_URL}/${threadsUserId}/threads`, null, {
       params: {
         access_token: accessToken,
         media_type: isVideo ? 'VIDEO' : (mediaUrl ? 'IMAGE' : 'TEXT'),
-        text: text,
+        text: textForThreads, // Usar el texto recortado a 500 caracteres
         ...(mediaUrl && (isVideo ? { video_url: mediaUrl } : { image_url: mediaUrl })),
       },
     });
