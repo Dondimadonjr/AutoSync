@@ -23,6 +23,30 @@ function formatearCaptionIA(propuesta) {
   return String(propuesta || '').trim();
 }
 
+/**
+ * Obtiene dinámicamente el ID del cliente activo asociado al chat de Telegram
+ */
+async function obtenerClienteActivo(chatId) {
+  const { data: clienteActivo } = await supabase
+    .from('clientes')
+    .select('id')
+    .eq('telegram_chat_id', chatId)
+    .maybeSingle();
+
+  if (clienteActivo) {
+    return clienteActivo.id;
+  }
+
+  // Fallback si aún no tiene un cliente asignado a su chat
+  const { data: clienteDefault } = await supabase
+    .from('clientes')
+    .select('id')
+    .limit(1)
+    .maybeSingle();
+
+  return clienteDefault?.id || '3da1634c-2f46-47d3-b098-3c1638f27e8c';
+}
+
 async function handleWebhook(req, res) {
   // Responder HTTP 200 de inmediato a Telegram
   res.status(200).json({ ok: true });
@@ -45,12 +69,79 @@ async function handleWebhook(req, res) {
             chatId,
             `¡Hola, *${from?.first_name || 'Usuario'}*! 👋\n\n` +
               `Bienvenido a *AutoSync* 🤖.\n\n` +
+              `• Usa \`/cliente\` para ver o cambiar la empresa/marca activa.\n` +
+              `• Usa \`/agendados\` para ver y gestionar publicaciones programadas.\n\n` +
               `Envía cualquier video o foto con una breve leyenda para generar y publicar tu post.`
           );
           return;
         }
 
-        // 2. Comando /agendados
+        // 2. Comando /cliente (listar o cambiar empresa activa)
+        if (text && text.startsWith('/cliente')) {
+          const partes = text.split(' ');
+          const nombreEmpresa = partes.slice(1).join(' ').trim();
+
+          if (!nombreEmpresa) {
+            // Listar clientes disponibles
+            const { data: clientes, error: errClientes } = await supabase
+              .from('clientes')
+              .select('*')
+              .order('nombre', { ascending: true });
+
+            if (errClientes || !clientes || clientes.length === 0) {
+              await sendMessage(chatId, '⚠️ No hay empresas registradas en la base de datos.');
+              return;
+            }
+
+            // Consultar cuál es el cliente actualmente activo para este chat
+            const { data: clienteActivo } = await supabase
+              .from('clientes')
+              .select('id, nombre')
+              .eq('telegram_chat_id', chatId)
+              .maybeSingle();
+
+            let msg = '🏢 *Empresas / Marcas Disponibles:*\n\n';
+            clientes.forEach((c, index) => {
+              const esActivo = clienteActivo && clienteActivo.id === c.id;
+              msg += `${index + 1}. *${c.nombre}* (ID: \`${c.id}\`)${esActivo ? ' 🟢 *(Activa)*' : ''}\n`;
+            });
+            msg += `\nPara seleccionar una, escribe:\n\`/cliente Nombre de la Empresa\``;
+            await sendMessage(chatId, msg, { parse_mode: 'Markdown' });
+            return;
+          }
+
+          // Buscar cliente por nombre
+          const { data: clienteEncontrado, error: searchErr } = await supabase
+            .from('clientes')
+            .select('*')
+            .ilike('nombre', `%${nombreEmpresa}%`)
+            .maybeSingle();
+
+          if (searchErr || !clienteEncontrado) {
+            await sendMessage(chatId, `❌ No encontré ninguna empresa con el nombre "${nombreEmpresa}".\n\nUsa \`/cliente\` para ver las disponibles.`);
+            return;
+          }
+
+          // Desvincular este chatId de otros clientes para mantener una única empresa activa
+          await supabase
+            .from('clientes')
+            .update({ telegram_chat_id: null })
+            .eq('telegram_chat_id', chatId);
+
+          // Asociar el chat id al cliente activo seleccionado
+          await supabase
+            .from('clientes')
+            .update({ telegram_chat_id: chatId })
+            .eq('id', clienteEncontrado.id);
+
+          await sendMessage(
+            chatId,
+            `✅ *Empresa activa cambiada a:* ${clienteEncontrado.nombre}\n\nA partir de ahora, los archivos que envíes se publicarán en las redes de esta marca.`
+          );
+          return;
+        }
+
+        // 3. Comando /agendados
         if (text && text.startsWith('/agendados')) {
           await listarAgendados(chatId);
           return;
@@ -201,10 +292,7 @@ async function handleWebhook(req, res) {
           // A. ÁLBUM / CARRUSEL (Invocación atómica a Postgres)
           if (mediaGroupId) {
             const mediaUrlTemp = await subirVideoDesdeTelegram(archivoMultimedia.file_id);
-
-            let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
-            const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
-            if (clienteDB) clienteId = clienteDB.id;
+            const clienteId = await obtenerClienteActivo(chatId);
 
             // Invocar el procedimiento atómico
             const { data: rpcRows, error: rpcError } = await supabase
@@ -288,9 +376,7 @@ async function handleWebhook(req, res) {
 
           // 3. Subir el buffer ya descargado a Supabase Storage
           const mediaUrl = await subirBufferASupabase(mediaBuffer, mediaContentType, mediaExt);
-          let clienteId = '3da1634c-2f46-47d3-b098-3c1638f27e8c';
-          const { data: clienteDB } = await supabase.from('clientes').select('id').limit(1).single();
-          if (clienteDB) clienteId = clienteDB.id;
+          const clienteId = await obtenerClienteActivo(chatId);
 
           const { data: nuevaPublicacion, error: dbError } = await supabase
             .from('publicaciones')
