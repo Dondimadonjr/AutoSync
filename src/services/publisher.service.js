@@ -12,6 +12,7 @@ const {
 } = require('./meta.service');
 const { sendMessage } = require('./telegram.service');
 const { publicarEnThreads } = require('./threads.service');
+const { enviarAlertaCritica } = require('./alertas.service');
 
 /**
  * Registra un evento en la tabla de auditoría logs_publicacion
@@ -230,6 +231,9 @@ async function procesarAprobacionAsync(publicacionId, chatId) {
     await registrarLog(publicacionId, 'PUBLICACION_FALLIDA', 'ERROR', { 
       error: typeof errorDetails === 'object' ? JSON.stringify(errorDetails) : errorDetails,
     });
+
+    // Disparar alerta crítica directa a Telegram
+    await enviarAlertaCritica(`Error publicando el post ${publicacionId}`, { error: errorDetails });
 
     await sendMessage(
       chatId,

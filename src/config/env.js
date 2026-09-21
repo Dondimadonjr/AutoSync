@@ -10,6 +10,7 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().min(1, 'GEMINI_API_KEY es requerida'),
   TELEGRAM_BOT_TOKEN: z.string().min(1, 'TELEGRAM_BOT_TOKEN es requerido'),
   TELEGRAM_CHAT_ID: z.string().optional(),
+  TELEGRAM_ADMIN_CHAT_ID: z.string().optional(),
   TELEGRAM_WEBHOOK_SECRET: z.string().min(8, 'TELEGRAM_WEBHOOK_SECRET debe tener al menos 8 caracteres').optional(),
 });
 
